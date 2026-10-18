@@ -140,10 +140,27 @@ fetch("/api/health").then((r) => r.json()).then(async (j) => {
   preloadAck();
 }).catch(() => {});
 // „Ja, Chef?“ vorab laden, damit es ohne Verzögerung kommt
-const ACK = `Ja, ${NAME}?`;
+// ---------- Sprache: Deutsch oder Tigrinya ----------
+const langSelect = $("langSelect"), langBtn = $("langBtn");
+let lang = "de";
+try { lang = localStorage.getItem("jarvis-lang") === "ti" ? "ti" : "de"; } catch {}
+const ACKS = { de: `Ja, ${NAME}?`, ti: "እወ ሸፍ?" };
+let ACK = ACKS[lang];
+function setLang(l) {
+  lang = l === "ti" ? "ti" : "de";
+  ACK = ACKS[lang];
+  langSelect.value = lang;
+  langBtn.textContent = lang === "ti" ? "ትግ" : "DE";
+  langBtn.classList.toggle("on", lang === "ti");
+  try { localStorage.setItem("jarvis-lang", lang); } catch {}
+  preloadAck();
+}
+langSelect.onchange = () => setLang(langSelect.value);
+langBtn.onclick = (e) => { e.stopPropagation(); setLang(lang === "ti" ? "de" : "ti"); stopSpeaking(); speak(ACK); };
+
 const ttsCache = new Map();
 function preloadAck() {
-  if (!fishOn) return;
+  if (!fishOn && lang !== "ti") return;
   const url = ttsUrl(ACK);
   if (ttsCache.has(url)) return;
   fetch(url).then((r) => (r.ok ? r.blob() : null)).then((b) => b && ttsCache.set(url, URL.createObjectURL(b))).catch(() => {});
@@ -282,7 +299,7 @@ async function ask(text) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: history.slice(-20) }),
+      body: JSON.stringify({ messages: history.slice(-20), lang }),
       signal: AbortSignal.timeout(30000),
     });
     if (!res.ok || !res.body) {
@@ -414,6 +431,7 @@ if (!SR) {
     }
     // Nachhall der eigenen Stimme kurz nach dem Sprechen ignorieren
     if (finalText && isEcho(finalText)) return;
+    if (tiCapturing) return; // Tigrinya-Aufnahme läuft, Chrome-Text wird nicht gebraucht
     // Nach „Jarvis“ wird gesammelt, bis du eine kurze Pause machst – so kannst du ausreden
     if (collecting) {
       if (finalText) cmdBuf = `${cmdBuf} ${finalText}`.trim();
@@ -433,6 +451,7 @@ if (!SR) {
       const cmd = findWakeWord(finalText);
       if (cmd === null) return;
       dbg("wake", cmd ? "mit Frage" : "nur Name");
+      if (lang === "ti") { tiCapture(true); return; }
       if (cmd) collect(cmd);
       else {
         // Nur „Jarvis“ gesagt: auf die Frage warten. Kommt kurz nichts, „Ja, Chef?“ sagen
@@ -478,6 +497,84 @@ function armSilence() {
 function showLive(text) {
   heardEl.textContent = text ? `„${text} …“` : "";
   heardEl.classList.toggle("show", !!text);
+}
+
+// ---------- Tigrinya-Spracheingabe ----------
+// Chrome kann kein Tigrinya erkennen. Deshalb nimmt Jarvis nach seinem Namen die Frage
+// selbst auf (bis du eine Pause machst) und lässt sie von Gemini aufschreiben.
+let tiCapturing = false, micStream = null;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function tiCapture(withAck) {
+  if (tiCapturing || busy) return;
+  tiCapturing = true;
+  try {
+    if (withAck) {
+      speak(ACK);
+      for (let i = 0; i < 60 && speakQueue > 0; i++) await sleep(100); // erst ausreden lassen, sonst nimmt er sich selbst auf
+    }
+    setState("listening", "ይሰምዕ ኣሎ … (Tigrinya)");
+    const blob = await recordUntilSilence();
+    if (!blob) { setState(null); return; }
+    setState("thinking", "Versteht …");
+    const wav = await toWav16k(blob);
+    const r = await fetch("/api/transcribe?lang=ti", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav });
+    const { text = "", error } = await r.json();
+    if (error) throw new Error(error);
+    dbg("ti-transkript", text ? "ok" : "leer");
+    setState(null);
+    if (text.trim()) ask(text.trim());
+    else showQuestion("Nicht verstanden – bitte nochmal.");
+  } catch (err) {
+    dbg("ti-fehler", err.message);
+    setState(null);
+    showQuestion(`Aufnahme-Fehler: ${err.message}`);
+  } finally {
+    tiCapturing = false;
+  }
+}
+
+// Nimmt auf, bis nach dem Sprechen 1,2 s Stille ist (max. 15 s; ohne Sprache nach 7 s Abbruch)
+async function recordUntilSilence() {
+  micStream = micStream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const an = ctx.createAnalyser(); an.fftSize = 1024;
+  ctx.createMediaStreamSource(micStream).connect(an);
+  const buf = new Float32Array(an.fftSize);
+  const rec2 = new MediaRecorder(micStream), chunks = [];
+  rec2.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  rec2.start(250);
+  const t0 = Date.now();
+  let floor = 0.004, spoke = false, lastVoice = Date.now();
+  while (true) {
+    await sleep(60);
+    an.getFloatTimeDomainData(buf);
+    const rms = Math.sqrt(buf.reduce((a, x) => a + x * x, 0) / buf.length);
+    if (Date.now() - t0 < 300) { floor = Math.max(floor, rms); continue; } // Grundrauschen messen
+    if (rms > Math.max(0.012, floor * 2.5)) { spoke = true; lastVoice = Date.now(); }
+    const elapsed = Date.now() - t0;
+    if (spoke && Date.now() - lastVoice > 1200) break;
+    if (!spoke && elapsed > 7000) break;
+    if (elapsed > 15000) break;
+  }
+  await new Promise((r) => { rec2.onstop = r; rec2.stop(); });
+  ctx.close();
+  return spoke ? new Blob(chunks, { type: rec2.mimeType || "audio/webm" }) : null;
+}
+
+// Wandelt die Aufnahme in WAV (16 kHz, mono) um, das versteht Gemini sicher
+async function toWav16k(blob) {
+  const decoded = await new OfflineAudioContext(1, 16000, 16000).decodeAudioData(await blob.arrayBuffer());
+  const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  const view = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+  const str = (o, t) => [...t].forEach((c, i) => view.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); view.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  str(36, "data"); view.setUint32(40, pcm.length * 2, true);
+  pcm.forEach((x, i) => view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, x)) * 0x7fff, true));
+  return new Blob([view], { type: "audio/wav" });
 }
 
 // Die deutsche Spracherkennung schreibt „Jarvis“ oft anders (Javis, Dschawis, Charvis …).
@@ -550,6 +647,7 @@ function resumeRecognition() {
 
 reactor.addEventListener("click", () => {
   if (speakQueue > 0) { stopSpeaking(); return; }
+  if (lang === "ti") { tiCapture(false); return; } // Tigrinya: Klick = sofort aufnehmen
   if (!rec) return;
   if (listening && !wakeToggle.checked) { rec.stop(); return; }
   wantListening = true;
@@ -575,6 +673,8 @@ document.addEventListener("visibilitychange", () => {
   dbg("visibility", document.visibilityState);
   if (document.visibilityState === "visible") resumeRecognition();
 });
+
+setLang(lang);
 
 // Beim Öffnen der Seite sofort auf „Jarvis“ hören
 if (rec && wakeToggle.checked) {

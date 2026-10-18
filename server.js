@@ -2,8 +2,8 @@ import "dotenv/config";
 import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import { toolDeclarations, runTool, loadMemory, findImage, wetter, nachrichten } from "./tools.js";
-import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -59,7 +59,7 @@ function topicKnowledge(messages = []) {
   return KNOWLEDGE.filter((k) => k.match.test(recent));
 }
 
-function systemPrompt(messages = []) {
+function systemPrompt(messages = [], lang = "de") {
   const now = new Date().toLocaleString("de-DE", {
     dateStyle: "full",
     timeStyle: "short",
@@ -70,7 +70,8 @@ Persönlichkeit: höflich, ruhig, präzise und sachlich. Du sprichst den Nutzer 
 Deine Antworten werden laut vorgelesen. Beantworte nur genau die gestellte Frage, direkt und ohne Einleitung, meist in einem einzigen kurzen Satz, höchstens zwei, außer es wird ausdrücklich mehr verlangt.
 Keine Kommentare, keine Witze, keine Bewertungen, keine Rückfragen und keine Angebote wie „Soll ich …?“. Nach einer Aktion (Timer, App, Musik …) nur kurz bestätigen, z. B. „Erledigt, ${USER_NAME}.“
 Verwende keine Markdown-Formatierung, keine Aufzählungszeichen, keine Emojis und keine Codeblöcke, außer der Nutzer bittet ausdrücklich um Code.
-Antworte in der Sprache, in der du angesprochen wirst (standardmäßig Deutsch).
+Antworte in der Sprache, in der du angesprochen wirst (standardmäßig Deutsch).${lang === "ti" ? "\nDer Nutzer hat Tigrinya als Sprache gewählt: Antworte immer auf Tigrinya in Ge'ez-Schrift, auch wenn er Deutsch spricht." : ""}
+Wenn du auf Tigrinya antwortest: schreib in Ge'ez-Schrift, schreib Zahlen als Wörter aus (keine Ziffern) und sprich den Nutzer mit „ሸፍ“ an.
 Du hast Werkzeuge: Wetter, Nachrichten, Webseiten, YouTube, Mac-Apps, Timer, Lautstärke, Musik (Spotify) und ein Gedächtnis. Nutze sie, statt zu sagen, dass du etwas nicht kannst. Erfinde nie Wetter- oder Nachrichtendaten. Fasse Werkzeug-Ergebnisse kurz und natürlich zusammen.
 Wenn der Nutzer dir etwas Persönliches erzählt oder „merk dir“ sagt, speichere es mit „merken“.
 Wenn der Nutzer eine Präsentation, Folien oder etwas bildlich erklärt haben möchte, nutze „praesentation_erstellen“ mit 4 bis 7 Folien, je 2 bis 4 kurzen Stichpunkten und einem Bild-Suchbegriff. Sag danach nur einen kurzen Satz, z. B. „Hier ist Ihre Präsentation, ${USER_NAME}.“
@@ -118,9 +119,9 @@ async function* lines(body) {
 class ProviderError extends Error {}
 
 // ---------- Anbieter: jeder liefert Textstücke ----------
-async function* streamClaude(messages, signal) {
+async function* streamClaude(messages, signal, _emit, opts = {}) {
   const stream = anthropic.messages.stream(
-    { model: MODEL, max_tokens: 2048, system: systemPrompt(messages), messages },
+    { model: MODEL, max_tokens: 2048, system: systemPrompt(messages, opts.lang), messages },
     { signal },
   );
   try {
@@ -142,8 +143,8 @@ let preferred = 0; // zuletzt funktionierendes Modell zuerst probieren
 // Für Fachfragen (z. B. Onlinehandel) ein stärkeres Modell zuerst probieren, sonst das schnelle
 const EXPERT_MODEL = process.env.GEMINI_EXPERT_MODEL || "gemini-flash-latest";
 
-async function* streamGemini(messages, signal, emit) {
-  const prompt = systemPrompt(messages);
+async function* streamGemini(messages, signal, emit, opts = {}) {
+  const prompt = systemPrompt(messages, opts.lang);
   const expert = topicKnowledge(messages).length > 0;
   const order = expert
     ? [EXPERT_MODEL, ...GEMINI_FALLBACKS.filter((m) => m !== EXPERT_MODEL)]
@@ -205,7 +206,7 @@ async function* streamGemini(messages, signal, emit) {
   }
 }
 
-async function* streamOllama(messages, signal) {
+async function* streamOllama(messages, signal, _emit, opts = {}) {
   let res;
   try {
     res = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -215,7 +216,7 @@ async function* streamOllama(messages, signal) {
       body: JSON.stringify({
         model: MODEL,
         stream: true,
-        messages: [{ role: "system", content: systemPrompt(messages) }, ...messages],
+        messages: [{ role: "system", content: systemPrompt(messages, opts.lang) }, ...messages],
       }),
     });
   } catch (err) {
@@ -271,7 +272,7 @@ app.get("/api/image", async (req, res) => {
   res.json({ url });
 });
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, provider: PROVIDER, model: MODEL, tts: FISH ? "fish" : "browser" }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, provider: PROVIDER, model: MODEL, tts: FISH ? "fish" : "browser", tigrinya: existsSync(TI_PY) }));
 
 // GET erlaubt dem Browser, das Audio schon abzuspielen, während es noch lädt
 app.get("/api/tts", (req, res) => tts(String(req.query.text || ""), res, req.query));
@@ -302,8 +303,67 @@ app.get("/api/voices", async (_req, res) => {
   res.json(data);
 });
 
+// ---------- Tigrinya: lokale Stimme (Meta MMS-TTS) als eigener Prozess ----------
+// Wird nur gestartet, wenn tts-ti/.venv eingerichtet ist (siehe tts-ti/server.py).
+const TI_PORT = 5055;
+const TI_PY = path.join(__dirname, "tts-ti", ".venv", "bin", "python");
+const ETHIOPIC = /[ሀ-᎟ⶀ-⷟]/;
+let tiProc = null, tiRestarts = 0;
+function startTigrinyaVoice() {
+  if (!existsSync(TI_PY) || tiProc) return;
+  tiProc = spawn(TI_PY, ["-W", "ignore", path.join(__dirname, "tts-ti", "server.py")], { stdio: ["ignore", "ignore", "inherit"], env: { ...process.env, TTS_TI_PORT: String(TI_PORT) } });
+  tiProc.on("exit", () => {
+    tiProc = null;
+    if (++tiRestarts <= 5) setTimeout(startTigrinyaVoice, 3000 * tiRestarts);
+  });
+}
+startTigrinyaVoice();
+process.on("exit", () => tiProc?.kill());
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { tiProc?.kill(); process.exit(0); });
+
+async function ttsTigrinya(text, res) {
+  const controller = new AbortController();
+  res.on("close", () => controller.abort());
+  try {
+    const r = await fetch(`http://127.0.0.1:${TI_PORT}/tts?text=${encodeURIComponent(text.slice(0, 1000))}`, { signal: controller.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    res.setHeader("Content-Type", "audio/wav");
+    res.end(Buffer.from(await r.arrayBuffer()));
+  } catch (err) {
+    if (!controller.signal.aborted && !res.headersSent) res.status(502).json({ error: "Tigrinya-Stimme nicht bereit." });
+  }
+}
+
+// ---------- Spracherkennung für Sprachen, die Chrome nicht kann (z. B. Tigrinya) ----------
+// Der Browser schickt eine WAV-Aufnahme, Gemini schreibt sie wörtlich auf.
+const LANG_NAMES = { ti: "Tigrinya (in Ge'ez-Schrift)", de: "Deutsch" };
+app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "15mb" }), async (req, res) => {
+  if (PROVIDER !== "gemini") return res.status(400).json({ error: "Nur mit Gemini möglich." });
+  const lang = LANG_NAMES[req.query.lang] || LANG_NAMES.ti;
+  if (!req.body?.length) return res.status(400).json({ error: "Keine Aufnahme." });
+  const body = JSON.stringify({
+    contents: [{ role: "user", parts: [
+      { inlineData: { mimeType: "audio/wav", data: req.body.toString("base64") } },
+      { text: `Transkribiere diese Aufnahme wörtlich. Die Sprache ist ${lang}; falls stattdessen Deutsch gesprochen wird, schreib Deutsch. Gib nur den gesprochenen Text aus, ohne Erklärung. Ist nichts Verständliches zu hören, gib nichts aus.` },
+    ] }],
+    generationConfig: { maxOutputTokens: 400 },
+  });
+  for (const model of ["gemini-3.1-flash-lite", "gemini-flash-latest", MODEL]) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY }, body,
+    }).catch(() => null);
+    if (!r || r.status === 429 || r.status === 503 || r.status === 404) continue;
+    const j = await r.json().catch(() => ({}));
+    const text = (j.candidates?.[0]?.content?.parts || []).filter((p) => p.text && !p.thought).map((p) => p.text).join("").trim();
+    return res.json({ text });
+  }
+  res.status(503).json({ error: "Spracherkennung gerade nicht erreichbar." });
+});
+
 async function tts(rawText, res, opts = {}) {
   const text = rawText.trim().slice(0, 2000);
+  // Ge'ez-Schrift (Tigrinya) kann Fish Audio nicht aussprechen → lokale Stimme
+  if (text && ETHIOPIC.test(text) && existsSync(TI_PY)) return ttsTigrinya(text, res);
   const voice = /^[0-9a-f]{32}$/.test(opts.voice) ? opts.voice : FISH?.voice;
   const speed = Math.min(1.5, Math.max(0.7, Number(opts.speed) || FISH?.speed || 1));
   if (!FISH) return res.status(404).json({ error: "Fish Audio ist nicht eingerichtet (FISH_API_KEY fehlt in .env)." });
@@ -363,7 +423,8 @@ app.post("/api/chat", async (req, res) => {
   res.on("close", () => controller.abort());
 
   try {
-    for await (const text of providers[PROVIDER](messages, controller.signal, send)) send("delta", { text });
+    const lang = req.body?.lang === "ti" ? "ti" : "de";
+    for await (const text of providers[PROVIDER](messages, controller.signal, send, { lang })) send("delta", { text });
     send("done", {});
   } catch (err) {
     if (!controller.signal.aborted) {

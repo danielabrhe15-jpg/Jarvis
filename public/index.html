@@ -111,6 +111,7 @@
       <button type="submit" id="sendBtn">Senden</button>
     </form>
     <div class="dock">
+      <button id="langBtn" class="icon lang" type="button" title="Sprache wechseln (Deutsch / Tigrinya)" aria-label="Sprache">DE</button>
       <button id="kbdBtn" class="icon" type="button" title="Tippen statt sprechen" aria-label="Tastatur">⌨</button>
       <button id="settingsBtn" class="icon" type="button" title="Einstellungen" aria-label="Einstellungen">⚙</button>
     </div>
@@ -118,6 +119,12 @@
       <h2>Einstellungen</h2>
       <label class="row"><span>Sprachausgabe</span><input type="checkbox" id="ttsToggle" checked /></label>
       <label class="row"><span>Auf „Jarvis“ hören</span><input type="checkbox" id="wakeToggle" checked /></label>
+      <label class="row"><span>Sprache</span>
+        <select id="langSelect" title="Sprache" class="short">
+          <option value="de">Deutsch</option>
+          <option value="ti">ትግርኛ Tigrinya</option>
+        </select>
+      </label>
       <label class="row stack"><span>Stimme und Tempo</span><select id="voiceSelect" title="Stimme"></select></label>
       <button id="clearBtn" type="button">Verlauf löschen</button>
     </div>
