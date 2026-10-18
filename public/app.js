@@ -205,11 +205,11 @@ if (!SR) {
     if (interim) input.placeholder = interim;
     if (!finalText) return;
     input.placeholder = "Nachricht an Jarvis…";
+    showHeard(finalText);
 
     if (wakeToggle.checked && !awaitingCommand) {
-      const m = finalText.match(/\b(jarvis|jarwis|jervis|dschawis|tschawis|charvis)\b[,.!?\s]*(.*)$/i);
-      if (!m) return;
-      const cmd = m[2].trim();
+      const cmd = findWakeWord(finalText);
+      if (cmd === null) return;
       if (cmd) ask(cmd);
       else {
         // Nur „Hey Jarvis“ gesagt: kurz bestätigen und auf die Frage warten
@@ -224,6 +224,33 @@ if (!SR) {
       ask(finalText);
     }
   };
+}
+
+// Die deutsche Spracherkennung schreibt „Jarvis“ oft anders (Javis, Dschawis, Charvis …).
+// Gibt den Text nach dem Wake-Word zurück, "" wenn nur das Wake-Word kam, sonst null.
+const JARVIS_LIKE = /^(j|y|g|dsch|tsch|sch|ch|sh|d)?(a|ä|e|ah)r?(w|v|b|f)(i|ie|e|y)(s|ss|ß|z|ce|ses)?$/;
+const HEY_LIKE = /^(hey|hei|hej|hay|he|hi|hallo|ey|okay|ok)$/;
+function findWakeWord(text) {
+  const words = text.trim().split(/\s+/);
+  const norm = (w) => (w || "").toLowerCase().replace(/[^a-zäöüß]/g, "");
+  for (let i = 0; i < words.length; i++) {
+    const w = norm(words[i]);
+    const next = norm(words[i + 1]);
+    if (JARVIS_LIKE.test(w) && w.length >= 4) return words.slice(i + 1).join(" ").replace(/^[,.!?\s]+/, "").trim();
+    if (HEY_LIKE.test(w) && next && (JARVIS_LIKE.test(next) || /^(j|dsch|tsch|sch|ch|sh|g)/.test(next))) {
+      return words.slice(i + 2).join(" ").replace(/^[,.!?\s]+/, "").trim();
+    }
+  }
+  return null;
+}
+
+// Zeigt kurz an, was Jarvis verstanden hat (hilft, wenn das Wake-Word nicht klappt)
+let heardTimer = null;
+function showHeard(text) {
+  if (!wakeToggle.checked) return;
+  hint.textContent = `Gehört: „${text.trim()}“`;
+  clearTimeout(heardTimer);
+  heardTimer = setTimeout(() => { hint.textContent = HINT_WAKE; }, 4000);
 }
 
 function startListening() {
