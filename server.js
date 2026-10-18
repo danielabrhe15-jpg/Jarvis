@@ -3,6 +3,7 @@ import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import { toolDeclarations, runTool, loadMemory, findImage, wetter, nachrichten } from "./tools.js";
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,7 +44,22 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-function systemPrompt() {
+// ---------- Fachwissen: wird nur bei passenden Fragen in den Prompt geladen ----------
+const KNOWLEDGE = [
+  {
+    file: "onlinehandel.md",
+    match: /dropship|online.?(shop|handel|verkauf|business)|e.?commerce|shopify|woocommerce|shopware|amazon|ebay|etsy|kaufland|otto market|marktplatz|aliexpress|cj ?dropshipping|bigbuy|lieferant|gewerbe|kleinunternehm|umsatzsteuer|mehrwertsteuer|vorsteuer|oss|ioss|impressum|widerruf|agb|abmahn|gewährleistung|verpack|lucid|gpsr|produktsicherheit|ce.?kennz|elektrog|weee|zoll|einfuhr|import|marge|kalkulation|roas|conversion|retoure|winning product|produktrecherche|meta ads|tiktok ads|werbung schalten|versandkosten|dhl|hermes|händler|verkaufen|produkte? (finden|verkaufen)/i,
+  },
+].map((k) => {
+  try { return { ...k, text: readFileSync(path.join(__dirname, "wissen", k.file), "utf8") }; } catch { return null; }
+}).filter(Boolean);
+
+function topicKnowledge(messages = []) {
+  const recent = messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join(" ");
+  return KNOWLEDGE.filter((k) => k.match.test(recent));
+}
+
+function systemPrompt(messages = []) {
   const now = new Date().toLocaleString("de-DE", {
     dateStyle: "full",
     timeStyle: "short",
@@ -58,7 +74,14 @@ Antworte in der Sprache, in der du angesprochen wirst (standardmäßig Deutsch).
 Du hast Werkzeuge: Wetter, Nachrichten, Webseiten, YouTube, Mac-Apps, Timer, Lautstärke, Musik (Spotify) und ein Gedächtnis. Nutze sie, statt zu sagen, dass du etwas nicht kannst. Erfinde nie Wetter- oder Nachrichtendaten. Fasse Werkzeug-Ergebnisse kurz und natürlich zusammen.
 Wenn der Nutzer dir etwas Persönliches erzählt oder „merk dir“ sagt, speichere es mit „merken“.
 Wenn der Nutzer eine Präsentation, Folien oder etwas bildlich erklärt haben möchte, nutze „praesentation_erstellen“ mit 4 bis 7 Folien, je 2 bis 4 kurzen Stichpunkten und einem Bild-Suchbegriff. Sag danach nur einen kurzen Satz, z. B. „Hier ist Ihre Präsentation, ${USER_NAME}.“
-Aktuelles Datum und Uhrzeit: ${now}.${memoryText()}`;
+Genauigkeit: Lies die Frage genau und beantworte exakt das Gefragte (z. B. eine Zahl, einen Ort, einen Zeitraum, ja oder nein). Antworte nur mit Fakten, die du sicher weißt. Wenn du etwas nicht sicher weißt oder aktuelle Daten fehlen, sag das in einem kurzen Satz, statt zu raten. Erfinde keine Zahlen, Gesetze, Preise oder Quellen.
+Aktuelles Datum und Uhrzeit: ${now}.${memoryText()}${knowledgeText(messages)}`;
+}
+
+function knowledgeText(messages) {
+  const k = topicKnowledge(messages);
+  if (!k.length) return "";
+  return `\n\nFür diese Frage hast du folgendes geprüfte Fachwissen. Nutze es vorrangig, und bei Fachfragen dazu darfst du bis zu drei Sätze antworten:\n\n${k.map((x) => x.text).join("\n\n")}`;
 }
 
 function memoryText() {
@@ -97,7 +120,7 @@ class ProviderError extends Error {}
 // ---------- Anbieter: jeder liefert Textstücke ----------
 async function* streamClaude(messages, signal) {
   const stream = anthropic.messages.stream(
-    { model: MODEL, max_tokens: 2048, system: systemPrompt(), messages },
+    { model: MODEL, max_tokens: 2048, system: systemPrompt(messages), messages },
     { signal },
   );
   try {
@@ -116,7 +139,15 @@ const GEMINI_FALLBACKS = [MODEL, ...(process.env.GEMINI_FALLBACKS || "gemini-3.1
 const noThinkingOff = new Set(); // Modelle, die das Abschalten des Nachdenkens ablehnen (spart eine Anfrage)
 let preferred = 0; // zuletzt funktionierendes Modell zuerst probieren
 
+// Für Fachfragen (z. B. Onlinehandel) ein stärkeres Modell zuerst probieren, sonst das schnelle
+const EXPERT_MODEL = process.env.GEMINI_EXPERT_MODEL || "gemini-flash-latest";
+
 async function* streamGemini(messages, signal, emit) {
+  const prompt = systemPrompt(messages);
+  const expert = topicKnowledge(messages).length > 0;
+  const order = expert
+    ? [EXPERT_MODEL, ...GEMINI_FALLBACKS.filter((m) => m !== EXPERT_MODEL)]
+    : GEMINI_FALLBACKS.map((_, k) => GEMINI_FALLBACKS[(preferred + k) % GEMINI_FALLBACKS.length]);
   const contents = messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
   const request = (model, fast) =>
     fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
@@ -124,7 +155,7 @@ async function* streamGemini(messages, signal, emit) {
       signal,
       headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt() }] },
+        systemInstruction: { parts: [{ text: prompt }] },
         contents,
         tools: [{ functionDeclarations: toolDeclarations }],
         // "Nachdenken" aus: Jarvis antwortet dadurch deutlich schneller
@@ -135,16 +166,16 @@ async function* streamGemini(messages, signal, emit) {
   // Ruft Gemini ein Werkzeug auf (Wetter, Webseite …), führen wir es aus und fragen erneut
   for (let round = 0; round < 4; round++) {
     let res;
-    for (let k = 0; k < GEMINI_FALLBACKS.length; k++) {
-      const idx = (preferred + k) % GEMINI_FALLBACKS.length, model = GEMINI_FALLBACKS[idx];
+    for (let k = 0; k < order.length; k++) {
+      const model = order[k], idx = GEMINI_FALLBACKS.indexOf(model);
       res = await request(model, !noThinkingOff.has(model));
       // Manche Modelle erlauben das Abschalten nicht, dann ohne erneut versuchen und das merken
       if (res.status === 400 && !noThinkingOff.has(model)) {
         const text = await res.clone().text();
         if (!/api key/i.test(text)) { noThinkingOff.add(model); res = await request(model, false); }
       }
-      if (res.status !== 429 && res.status !== 503 && res.status !== 404) { preferred = idx; break; }
-      if (k < GEMINI_FALLBACKS.length - 1) console.log(`Gemini ${model}: ${res.status}, versuche nächstes Modell`);
+      if (res.status !== 429 && res.status !== 503 && res.status !== 404) { if (!expert && idx >= 0) preferred = idx; break; }
+      if (k < order.length - 1) console.log(`Gemini ${model}: ${res.status}, versuche nächstes Modell`);
     }
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
@@ -184,7 +215,7 @@ async function* streamOllama(messages, signal) {
       body: JSON.stringify({
         model: MODEL,
         stream: true,
-        messages: [{ role: "system", content: systemPrompt() }, ...messages],
+        messages: [{ role: "system", content: systemPrompt(messages) }, ...messages],
       }),
     });
   } catch (err) {
