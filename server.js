@@ -323,17 +323,32 @@ startTigrinyaVoice();
 process.on("exit", () => tiProc?.kill());
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { tiProc?.kill(); process.exit(0); });
 
-async function ttsTigrinya(text, res) {
+// Tigrinya: zuerst Fish Audio mit deutscher Lautschrift (klingt natürlich, Python-Dienst
+// romanisiert und streamt), bei Problemen die lokale Meta-Stimme als Ausweichlösung
+async function ttsTigrinya(text, res, opts = {}) {
   const controller = new AbortController();
   res.on("close", () => controller.abort());
-  try {
-    const r = await fetch(`http://127.0.0.1:${TI_PORT}/tts?text=${encodeURIComponent(text.slice(0, 1000))}`, { signal: controller.signal });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    res.setHeader("Content-Type", "audio/wav");
-    res.end(Buffer.from(await r.arrayBuffer()));
-  } catch (err) {
-    if (!controller.signal.aborted && !res.headersSent) res.status(502).json({ error: "Tigrinya-Stimme nicht bereit." });
+  const q = `text=${encodeURIComponent(text.slice(0, 1000))}`;
+  const voice = /^[0-9a-f]{32}$/.test(opts.voice) ? `&voice=${opts.voice}` : "";
+  const speed = Number(opts.speed) ? `&speed=${Number(opts.speed)}` : "";
+  const tries = [
+    ...(FISH && process.env.TI_TTS !== "mms" ? [[`/fish?${q}${voice}${speed}`, "audio/mpeg"]] : []),
+    [`/tts?${q}`, "audio/wav"],
+  ];
+  for (const [url, type] of tries) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${TI_PORT}${url}`, { signal: controller.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text()).slice(0, 120)}`);
+      res.setHeader("Content-Type", type);
+      for await (const chunk of r.body) res.write(chunk);
+      return res.end();
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      if (res.headersSent) return res.end();
+      console.error("Tigrinya-Stimme:", err.message);
+    }
   }
+  res.status(502).json({ error: "Tigrinya-Stimme nicht bereit." });
 }
 
 // ---------- Spracherkennung für Sprachen, die Chrome nicht kann (z. B. Tigrinya) ----------
@@ -364,8 +379,8 @@ app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "15mb" }), asy
 
 async function tts(rawText, res, opts = {}) {
   const text = rawText.trim().slice(0, 2000);
-  // Ge'ez-Schrift (Tigrinya) kann Fish Audio nicht aussprechen → lokale Stimme
-  if (text && ETHIOPIC.test(text) && existsSync(TI_PY)) return ttsTigrinya(text, res);
+  // Ge'ez-Schrift kann Fish Audio nicht direkt lesen → erst in Lautschrift umschreiben (tts-ti)
+  if (text && ETHIOPIC.test(text) && existsSync(TI_PY)) return ttsTigrinya(text, res, opts);
   const voice = /^[0-9a-f]{32}$/.test(opts.voice) ? opts.voice : FISH?.voice;
   const speed = Math.min(1.5, Math.max(0.7, Number(opts.speed) || FISH?.speed || 1));
   if (!FISH) return res.status(404).json({ error: "Fish Audio ist nicht eingerichtet (FISH_API_KEY fehlt in .env)." });

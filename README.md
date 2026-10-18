@@ -60,15 +60,15 @@ Mit Fish Audio gibt es unten auf der Seite ein Stimmen-Menü (deutsche Jarvis-St
 
 ## Tigrinya (optional)
 
-Unten rechts auf **DE** klicken (oder ⚙ → Sprache), dann steht dort **ትግ**. Sag „Jarvis“, warte auf „እወ ሸፍ?“ und stell deine Frage auf Tigrinya, danach kurz still sein. Chrome kann kein Tigrinya erkennen, deshalb schreibt Gemini die Aufnahme auf (dauert etwa 4 Sekunden). Die Stimme (Meta MMS-TTS) läuft lokal auf deinem Rechner und wird von `server.js` automatisch gestartet, wenn sie eingerichtet ist:
+Unten rechts auf **DE** klicken (oder ⚙ → Sprache), dann steht dort **ትግ**. Sag „Jarvis“, warte auf „እወ ሸፍ?“ und stell deine Frage auf Tigrinya, danach kurz still sein. Chrome kann kein Tigrinya erkennen, deshalb schreibt Gemini die Aufnahme auf (dauert etwa 4 Sekunden). Gesprochen wird über Fish Audio: Ein kleiner Python-Dienst (`tts-ti/`) schreibt die Tigrinya-Antwort in deutsche Lautschrift um (z. B. „ከመይ ኣለኻ?“ → „Kemej alecha?“, Funktion `romanize_tigrinya` in `tts-ti/romanize.py`) und schickt sie asynchron an Fish Audio (`s2.1-pro-free`, Latenz „balanced“), sodass die deutsche Jarvis-Stimme sie flüssig vorliest. Fällt Fish Audio aus, übernimmt eine lokale Stimme von Meta (MMS-TTS). `server.js` startet den Dienst automatisch, wenn er eingerichtet ist:
 
 ```bash
 python3 -m venv tts-ti/.venv
-tts-ti/.venv/bin/pip install "torch>=2.2,<2.9" "transformers>=4.40,<4.50" scipy regex
+tts-ti/.venv/bin/pip install aiohttp "torch>=2.2,<2.9" "transformers>=4.40,<4.50" scipy regex
 git clone https://github.com/isi-nlp/uroman tts-ti/uroman-src
 ```
 
-Beim ersten Start lädt die Stimme das Modell `facebook/mms-tts-tir` herunter.
+Für die Ausweich-Stimme wird beim ersten Bedarf das Modell `facebook/mms-tts-tir` heruntergeladen. Mit `TI_ROMAN_STYLE=en` gibt es englische statt deutscher Lautschrift (für englische Stimmen), mit `TI_TTS=mms` nur die lokale Stimme.
 
 ## Bedienung
 
@@ -115,7 +115,8 @@ jarvis/
 │   ├── style.css    # Jarvis-Design
 │   └── app.js       # Chat, Spracheingabe und Sprachausgabe
 ├── tts-ti/
-│   └── server.py    # lokale Tigrinya-Stimme (Meta MMS-TTS)
+│   ├── romanize.py  # Tigrinya → Lautschrift, Zahlen auf Tigrinya
+│   └── server.py    # Tigrinya-Stimme: Fish Audio (asynchron) + lokale Ausweich-Stimme
 ├── wissen/          # Fachwissen, das bei passenden Fragen geladen wird
 ├── .env.example     # Vorlage für deine Einstellungen
 └── package.json
