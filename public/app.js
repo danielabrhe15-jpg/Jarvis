@@ -37,6 +37,7 @@ function setState(state, label) {
 const synth = window.speechSynthesis;
 let voices = [];
 let speakQueue = 0;
+let fishOn = false;
 
 function loadVoices() {
   if (!synth || fishOn) return;
@@ -75,7 +76,6 @@ voiceSelect.onchange = () => {
 
 // Fish Audio: wird genutzt, wenn der Server einen FISH_API_KEY hat. Dann gibt es eine
 // Auswahl an Fish-Stimmen und ein Sprechtempo, beides wird im Browser gespeichert.
-let fishOn = false;
 const speedSelect = document.createElement("select");
 speedSelect.title = "Sprechtempo";
 [["0.9", "Tempo langsam"], ["1", "Tempo normal"], ["1.1", "Tempo zügig"], ["1.2", "Tempo schnell"], ["1.35", "Tempo sehr schnell"]]
