@@ -5,3 +5,4 @@ npm-debug.log*
 memory.json
 tts-ti/.venv/
 tts-ti/uroman-src/
+__pycache__/

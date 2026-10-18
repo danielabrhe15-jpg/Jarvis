@@ -71,7 +71,7 @@ Deine Antworten werden laut vorgelesen. Beantworte nur genau die gestellte Frage
 Keine Kommentare, keine Witze, keine Bewertungen, keine Rückfragen und keine Angebote wie „Soll ich …?“. Nach einer Aktion (Timer, App, Musik …) nur kurz bestätigen, z. B. „Erledigt, ${USER_NAME}.“
 Verwende keine Markdown-Formatierung, keine Aufzählungszeichen, keine Emojis und keine Codeblöcke, außer der Nutzer bittet ausdrücklich um Code.
 Antworte in der Sprache, in der du angesprochen wirst (standardmäßig Deutsch).${lang === "ti" ? "\nDer Nutzer hat Tigrinya als Sprache gewählt: Antworte immer auf Tigrinya in Ge'ez-Schrift, auch wenn er Deutsch spricht." : ""}
-Wenn du auf Tigrinya antwortest: schreib in Ge'ez-Schrift, schreib Zahlen als Wörter aus (keine Ziffern) und sprich den Nutzer mit „ሸፍ“ an.
+Wenn du auf Tigrinya antwortest: schreib echtes Tigrinya (nicht Amharisch) in Ge'ez-Schrift; ausländische Orts- und Eigennamen (z. B. Birkenau, Berlin) schreib unverändert in lateinischer Schrift, nie in anderen Schriften (kein Arabisch, Hebräisch o. Ä.), keine Abkürzungen wie „እ.ኤ.አ.“, schreib Zahlen, Uhrzeiten und Daten immer als Ziffern (z. B. 19:25 oder 14 °C), nie als Wörter, und sprich den Nutzer mit „ሸፍ“ an.
 Du hast Werkzeuge: Wetter, Nachrichten, Webseiten, YouTube, Mac-Apps, Timer, Lautstärke, Musik (Spotify) und ein Gedächtnis. Nutze sie, statt zu sagen, dass du etwas nicht kannst. Erfinde nie Wetter- oder Nachrichtendaten. Fasse Werkzeug-Ergebnisse kurz und natürlich zusammen.
 Wenn der Nutzer dir etwas Persönliches erzählt oder „merk dir“ sagt, speichere es mit „merken“.
 Wenn der Nutzer eine Präsentation, Folien oder etwas bildlich erklärt haben möchte, nutze „praesentation_erstellen“ mit 4 bis 7 Folien, je 2 bis 4 kurzen Stichpunkten und einem Bild-Suchbegriff. Sag danach nur einen kurzen Satz, z. B. „Hier ist Ihre Präsentation, ${USER_NAME}.“
@@ -141,13 +141,15 @@ const noThinkingOff = new Set(); // Modelle, die das Abschalten des Nachdenkens 
 let preferred = 0; // zuletzt funktionierendes Modell zuerst probieren
 
 // Für Fachfragen (z. B. Onlinehandel) ein stärkeres Modell zuerst probieren, sonst das schnelle
-const EXPERT_MODEL = process.env.GEMINI_EXPERT_MODEL || "gemini-flash-latest";
+// (mehrere, weil jedes Modell ein eigenes kostenloses Tageslimit hat)
+const EXPERT_MODELS = (process.env.GEMINI_EXPERT_MODELS || "gemini-3.5-flash,gemini-flash-latest").split(",").map((m) => m.trim()).filter(Boolean);
 
 async function* streamGemini(messages, signal, emit, opts = {}) {
   const prompt = systemPrompt(messages, opts.lang);
-  const expert = topicKnowledge(messages).length > 0;
+  // Fachfragen und Tigrinya (das schnelle Modell mischt sonst Amharisch hinein) → stärkeres Modell
+  const expert = topicKnowledge(messages).length > 0 || opts.lang === "ti" || ETHIOPIC.test(messages.at(-1)?.content || "");
   const order = expert
-    ? [EXPERT_MODEL, ...GEMINI_FALLBACKS.filter((m) => m !== EXPERT_MODEL)]
+    ? [...EXPERT_MODELS, ...GEMINI_FALLBACKS.filter((m) => !EXPERT_MODELS.includes(m))]
     : GEMINI_FALLBACKS.map((_, k) => GEMINI_FALLBACKS[(preferred + k) % GEMINI_FALLBACKS.length]);
   const contents = messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
   const request = (model, fast) =>

@@ -58,6 +58,18 @@ Trag in `.env` deinen Key von <https://fish.audio/app/api-keys> als `FISH_API_KE
 
 Mit Fish Audio gibt es unten auf der Seite ein Stimmen-Menü (deutsche Jarvis-Stimmen, mit Probesatz) und ein Tempo-Menü. Die Auswahl merkt sich der Browser. Das Standard-Tempo stellst du mit `FISH_SPEED` ein.
 
+## Tigrinya (optional)
+
+Unten rechts auf **DE** klicken (oder ⚙ → Sprache), dann steht dort **ትግ**. Sag „Jarvis“, warte auf „እወ ሸፍ?“ und stell deine Frage auf Tigrinya, danach kurz still sein. Chrome kann kein Tigrinya erkennen, deshalb schreibt Gemini die Aufnahme auf (dauert etwa 4 Sekunden). Die Stimme (Meta MMS-TTS) läuft lokal auf deinem Rechner und wird von `server.js` automatisch gestartet, wenn sie eingerichtet ist:
+
+```bash
+python3 -m venv tts-ti/.venv
+tts-ti/.venv/bin/pip install "torch>=2.2,<2.9" "transformers>=4.40,<4.50" scipy regex
+git clone https://github.com/isi-nlp/uroman tts-ti/uroman-src
+```
+
+Beim ersten Start lädt die Stimme das Modell `facebook/mms-tts-tir` herunter.
+
 ## Bedienung
 
 | Aktion | So geht's |
@@ -67,7 +79,8 @@ Mit Fish Audio gibt es unten auf der Seite ein Stimmen-Menü (deutsche Jarvis-St
 | Schreiben | Unten rechts auf **⌨** klicken, Text eingeben und **Senden** |
 | Jarvis rufen | Einfach „Jarvis, …“ sagen, Jarvis hört automatisch zu, sobald die Seite offen ist (abschaltbar unten per Haken) |
 | Vorlesen stoppen | **Esc** |
-| Einstellungen | Unten rechts auf **⚙**: Sprachausgabe, Zuhören, Stimme, Tempo, Verlauf löschen |
+| Einstellungen | Unten rechts auf **⚙**: Sprachausgabe, Zuhören, Sprache, Stimme, Tempo, Verlauf löschen |
+| Sprache | Unten rechts auf **DE** / **ትግ** klicken: Deutsch oder Tigrinya |
 | Stimme und Tempo | Menüs im ⚙-Panel (mit Fish Audio die Fish-Stimmen, sonst die deutschen Stimmen deines Systems) |
 
 ## Einstellungen (`.env`)
@@ -84,7 +97,7 @@ Mit Fish Audio gibt es unten auf der Seite ein Stimmen-Menü (deutsche Jarvis-St
 | `PORT` | `3000` | Port des Servers |
 | `USER_NAME` | `Chef` | Wie Jarvis dich anspricht |
 | `CITY` | `Berlin` | Deine Stadt für Wetter und Anzeige |
-| `GEMINI_EXPERT_MODEL` | `gemini-flash-latest` | Stärkeres Modell für Fachfragen |
+| `GEMINI_EXPERT_MODELS` | `gemini-3.5-flash,gemini-flash-latest` | Stärkere Modelle für Fachfragen und Tigrinya (der Reihe nach) |
 | `GEMINI_FALLBACKS` | `gemini-3.1-flash-lite,…` | Ausweich-Modelle, wenn das Gratis-Limit eines Modells voll ist |
 | `FISH_SPEED` | `1.1` | Sprechtempo der Fish-Stimme |
 
@@ -101,6 +114,9 @@ jarvis/
 │   ├── index.html   # Oberfläche
 │   ├── style.css    # Jarvis-Design
 │   └── app.js       # Chat, Spracheingabe und Sprachausgabe
+├── tts-ti/
+│   └── server.py    # lokale Tigrinya-Stimme (Meta MMS-TTS)
+├── wissen/          # Fachwissen, das bei passenden Fragen geladen wird
 ├── .env.example     # Vorlage für deine Einstellungen
 └── package.json
 ```
