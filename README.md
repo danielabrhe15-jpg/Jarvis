@@ -1,6 +1,6 @@
 # 🤖 J.A.R.V.I.S.
 
-Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil, angetrieben von **Claude** (Anthropic).
+Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **kostenlos** mit Google Gemini oder Ollama, oder mit **Claude** (Anthropic).
 
 - 🎙️ **Spracheingabe** auf Deutsch (Klick auf den Reaktor oder Leertaste)
 - 🔊 **Sprachausgabe**: Jarvis liest seine Antworten vor, schon während er noch schreibt
@@ -9,42 +9,28 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil, angetrieben
 - 💾 Gesprächsverlauf bleibt im Browser gespeichert
 - 🌌 Arc-Reactor-Oberfläche im Jarvis-Look
 
-## Voraussetzungen
+## Schritt für Schritt (kostenlos)
 
-- [Node.js](https://nodejs.org) Version 18 oder neuer
-- Ein Anthropic API-Key: <https://console.anthropic.com/settings/keys>
-- Für Spracheingabe: **Google Chrome** oder **Microsoft Edge** (Firefox unterstützt keine Spracherkennung)
+1. **Node.js installieren:** <https://nodejs.org> (LTS-Version), Standardeinstellungen.
+2. **Kostenlosen Key holen:** <https://aistudio.google.com/apikey> mit deinem Google-Konto öffnen, auf „API-Schlüssel erstellen“ klicken und den Key kopieren. Keine Kreditkarte nötig.
+3. **Jarvis herunterladen:** Oben auf dieser Seite auf den grünen Button **Code** und dann **Download ZIP**. Die ZIP entpacken.
+4. **Key eintragen:** Im Ordner die Datei `.env.example` kopieren und die Kopie in `.env` umbenennen. Mit dem Editor öffnen und den Key hinter `GEMINI_API_KEY=` einfügen, speichern.
+   (Die Datei ist evtl. versteckt: Windows-Explorer „Ansicht“ → „Ausgeblendete Elemente“, Mac `Cmd + Shift + .`)
+5. **Terminal im Ordner öffnen:** Windows: in die Adressleiste des Ordners `cmd` tippen und Enter. Mac: Rechtsklick auf den Ordner → „Neues Terminal beim Ordner“.
+6. **Installieren und starten:**
+   ```bash
+   npm install
+   npm start
+   ```
+7. **Öffnen:** <http://localhost:3000> in **Chrome** oder **Edge**, Mikrofon erlauben, auf den Reaktor klicken und sprechen.
 
-## Installation
+## KI-Anbieter
 
-```bash
-git clone https://github.com/danielabrhe15-jpg/jarvis.git
-cd jarvis
-npm install
-```
-
-Dann die Konfigurationsdatei anlegen:
-
-```bash
-# macOS / Linux
-cp .env.example .env
-# Windows (PowerShell)
-copy .env.example .env
-```
-
-Öffne `.env` und trage deinen API-Key ein:
-
-```
-ANTHROPIC_API_KEY=sk-ant-dein-key
-```
-
-## Starten
-
-```bash
-npm start
-```
-
-Öffne danach **<http://localhost:3000>** im Browser und erlaube den Mikrofonzugriff.
+| Anbieter | Kosten | Was du brauchst |
+|---|---|---|
+| **Google Gemini** (Standard) | kostenlos (mit Nutzungslimit pro Minute/Tag) | Key von <https://aistudio.google.com/apikey> in `GEMINI_API_KEY` |
+| **Ollama** | kostenlos, offline, unbegrenzt | <https://ollama.com> installieren, `ollama pull llama3.2`, in `.env` `PROVIDER=ollama` setzen. Braucht einen halbwegs starken PC. |
+| **Claude** | kostenpflichtig | Key von <https://console.anthropic.com> in `ANTHROPIC_API_KEY` |
 
 ## Bedienung
 
@@ -60,8 +46,13 @@ npm start
 
 | Variable | Standard | Bedeutung |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | (leer) | Dein API-Key (Pflicht) |
-| `CLAUDE_MODEL` | `claude-opus-5-5` | Claude-Modell, z. B. `claude-sonnet-5-5` (schneller, günstiger) oder `claude-haiku-5-5` |
+| `PROVIDER` | automatisch | `gemini`, `ollama` oder `claude` |
+| `GEMINI_API_KEY` | (leer) | Kostenloser Google-Key |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Gemini-Modell |
+| `OLLAMA_MODEL` | `llama3.2` | Lokales Modell für Ollama |
+| `OLLAMA_URL` | `http://localhost:11434` | Adresse von Ollama |
+| `ANTHROPIC_API_KEY` | (leer) | Claude-Key |
+| `CLAUDE_MODEL` | `claude-opus-5-5` | Claude-Modell, z. B. `claude-sonnet-5-5` |
 | `PORT` | `3000` | Port des Servers |
 | `USER_NAME` | `Sir` | Wie Jarvis dich anspricht |
 
@@ -69,7 +60,7 @@ npm start
 
 ```
 jarvis/
-├── server.js        # Express-Server, spricht mit der Claude API (Streaming)
+├── server.js        # Express-Server, spricht mit Gemini, Ollama oder Claude (Streaming)
 ├── public/
 │   ├── index.html   # Oberfläche
 │   ├── style.css    # Jarvis-Design
@@ -81,7 +72,7 @@ jarvis/
 ## Hinweise
 
 - Dein API-Key bleibt auf deinem Rechner (in `.env`) und wird nie an den Browser geschickt.
-- Die API-Nutzung kostet je nach Modell Geld, siehe <https://www.anthropic.com/pricing>.
+- Beim kostenlosen Gemini-Zugang kann Google deine Eingaben zur Verbesserung seiner Dienste nutzen. Für private Gespräche ist Ollama die bessere Wahl.
 - Die Stimme hängt von deinem Betriebssystem und Browser ab. In Chrome klingen die „Google Deutsch“-Stimmen meist am besten.
 
 ## Lizenz
