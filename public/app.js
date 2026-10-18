@@ -245,6 +245,10 @@ if (!SR) {
   };
   rec.onerror = (e) => {
     dbg("error", e.error);
+    if (e.error === "audio-capture") {
+      // Mikrofon da, aber kein Ton: meist hat der Mac Chrome den Zugriff nicht erlaubt
+      hint.textContent = "Kein Ton vom Mikrofon. Mac: Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon → Chrome einschalten, dann Chrome neu starten.";
+    }
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
       wantListening = false;
       // Der Browser will einmal einen Klick sehen, bevor er das Mikrofon freigibt
