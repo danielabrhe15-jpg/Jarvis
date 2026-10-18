@@ -362,15 +362,73 @@ app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "15mb" }), asy
   res.status(503).json({ error: "Spracherkennung gerade nicht erreichbar." });
 });
 
+// ---------- Tigrinya mit Fish Audio: erst in Lautschrift umschreiben ----------
+// Fish Audio kann keine Ge'ez-Schrift lesen. tts-ti/romanize.py macht daraus lateinische
+// Lautschrift („ከመይ ኣለኻ“ → „kemey alekha“), die eine englische Stimmbasis flüssig vorliest.
+// TI_TTS=local nimmt stattdessen die lokale MMS-Stimme; die springt auch ein, wenn Fish scheitert.
+const TI_TTS = process.env.TI_TTS || "fish";
+let romanizer = null, romanizeSeq = 0;
+const romanizeWaiting = new Map();
+function startRomanizer() {
+  const py = existsSync(TI_PY) ? TI_PY : "python3";
+  const proc = spawn(py, ["-I", path.join(__dirname, "tts-ti", "romanize.py"), "--serve"], { stdio: ["pipe", "pipe", "inherit"] });
+  const fail = () => {
+    if (romanizer === proc) romanizer = null;
+    for (const w of romanizeWaiting.values()) w.reject(new Error("Lautschrift nicht verfügbar"));
+    romanizeWaiting.clear();
+  };
+  let buf = "";
+  proc.stdout.setEncoding("utf8");
+  proc.stdout.on("data", (d) => {
+    buf += d;
+    for (let i; (i = buf.indexOf("\n")) >= 0; buf = buf.slice(i + 1)) {
+      try {
+        const j = JSON.parse(buf.slice(0, i)), w = romanizeWaiting.get(j.id);
+        if (!w) continue;
+        romanizeWaiting.delete(j.id);
+        j.error ? w.reject(new Error(j.error)) : w.resolve(j.text);
+      } catch {}
+    }
+  });
+  proc.stdin.on("error", () => {});
+  proc.on("error", fail);
+  proc.on("exit", fail);
+  romanizer = proc;
+}
+function romanize(text) {
+  if (!romanizer) startRomanizer();
+  const id = ++romanizeSeq;
+  return new Promise((resolve, reject) => {
+    romanizeWaiting.set(id, { resolve, reject });
+    romanizer.stdin.write(JSON.stringify({ id, text }) + "\n");
+    setTimeout(() => { if (romanizeWaiting.delete(id)) reject(new Error("Lautschrift dauert zu lange")); }, 3000);
+  });
+}
+process.on("exit", () => romanizer?.kill());
+
 async function tts(rawText, res, opts = {}) {
   const text = rawText.trim().slice(0, 2000);
-  // Ge'ez-Schrift (Tigrinya) kann Fish Audio nicht aussprechen → lokale Stimme
-  if (text && ETHIOPIC.test(text) && existsSync(TI_PY)) return ttsTigrinya(text, res);
   const voice = /^[0-9a-f]{32}$/.test(opts.voice) ? opts.voice : FISH?.voice;
   const speed = Math.min(1.5, Math.max(0.7, Number(opts.speed) || FISH?.speed || 1));
+  if (text && ETHIOPIC.test(text)) {
+    const local = existsSync(TI_PY) ? () => ttsTigrinya(text, res) : null;
+    if (FISH && TI_TTS === "fish") {
+      try {
+        const latin = await romanize(text);
+        return fishTts(latin, res, { voice: process.env.FISH_TI_VOICE_ID || voice, speed, language: "en", fallback: local });
+      } catch (err) {
+        console.error("Lautschrift-Fehler:", err.message);
+      }
+    }
+    if (local) return local();
+  }
   if (!FISH) return res.status(404).json({ error: "Fish Audio ist nicht eingerichtet (FISH_API_KEY fehlt in .env)." });
   if (!text) return res.status(400).json({ error: "Kein Text." });
+  return fishTts(text, res, { voice, speed, language: "de" });
+}
 
+async function fishTts(text, res, { voice, speed, language, fallback = null }) {
+  if (!FISH) return res.status(404).json({ error: "Fish Audio ist nicht eingerichtet (FISH_API_KEY fehlt in .env)." });
   const controller = new AbortController();
   res.on("close", () => controller.abort());
   try {
@@ -378,7 +436,8 @@ async function tts(rawText, res, opts = {}) {
       method: "POST",
       signal: controller.signal,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FISH_API_KEY}`, model: FISH.model },
-      body: JSON.stringify({ text, reference_id: voice, format: "mp3", latency: "low", language: "de", prosody: { speed } }),
+      // „balanced“: Fish beginnt schneller zu sprechen, bei kaum hörbarem Qualitätsverlust
+      body: JSON.stringify({ text, reference_id: voice, format: "mp3", latency: "balanced", language, prosody: { speed } }),
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
@@ -387,6 +446,7 @@ async function tts(rawText, res, opts = {}) {
         r.status === 402 ? "Fish-Audio-Guthaben aufgebraucht." :
         `Fish-Audio-Fehler: ${j.message || r.status}`;
       console.error(msg);
+      if (fallback) return fallback();
       return res.status(502).json({ error: msg });
     }
     res.setHeader("Content-Type", "audio/mpeg");
@@ -395,8 +455,8 @@ async function tts(rawText, res, opts = {}) {
   } catch (err) {
     if (!controller.signal.aborted) {
       console.error("Fish-Audio-Fehler:", err?.message || err);
-      if (!res.headersSent) res.status(502).json({ error: "Fish Audio nicht erreichbar." });
-      else res.end();
+      if (!res.headersSent) return fallback ? fallback() : res.status(502).json({ error: "Fish Audio nicht erreichbar." });
+      res.end();
     }
   }
 }
