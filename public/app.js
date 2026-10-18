@@ -164,7 +164,10 @@ $("clearBtn").onclick = () => {
 
 // ---------- Spracheingabe ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, listening = false, wantListening = false, awaitingCommand = false;
+let rec = null, listening = false, wantListening = false, awaitingCommand = false, awaitTimer = null;
+const HINT_WAKE = "Sag „Hey Jarvis“ und dann deine Frage, z. B. „Hey Jarvis, wie spät ist es?“";
+const HINT_CLICK = "Klicke auf den Reaktor oder drücke die Leertaste, um zu sprechen.";
+try { if (localStorage.getItem("jarvis-wake") === "off") wakeToggle.checked = false; } catch {}
 
 if (!SR) {
   hint.textContent = "Dein Browser unterstützt keine Spracheingabe. Nutze Chrome oder Edge, oder tippe unten.";
@@ -185,8 +188,12 @@ if (!SR) {
   };
   rec.onerror = (e) => {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-      wantListening = false; wakeToggle.checked = false;
-      addMsg("error", "Mikrofonzugriff verweigert. Bitte im Browser erlauben.");
+      wantListening = false;
+      // Der Browser will einmal einen Klick sehen, bevor er das Mikrofon freigibt
+      hint.textContent = "Klicke einmal irgendwo auf die Seite und erlaube das Mikrofon, dann hört Jarvis auf „Hey Jarvis“.";
+      document.addEventListener("click", () => {
+        if (wakeToggle.checked) { wantListening = true; hint.textContent = HINT_WAKE; startListening(); }
+      }, { once: true });
     }
   };
   rec.onresult = (e) => {
@@ -200,13 +207,20 @@ if (!SR) {
     input.placeholder = "Nachricht an Jarvis…";
 
     if (wakeToggle.checked && !awaitingCommand) {
-      const m = finalText.match(/\b(jarvis|dschawis|tschawis|jarwis)\b[,.!?\s]*(.*)$/i);
+      const m = finalText.match(/\b(jarvis|jarwis|jervis|dschawis|tschawis|charvis)\b[,.!?\s]*(.*)$/i);
       if (!m) return;
       const cmd = m[2].trim();
       if (cmd) ask(cmd);
-      else { awaitingCommand = true; speak("Ja, Sir?"); }
+      else {
+        // Nur „Hey Jarvis“ gesagt: kurz bestätigen und auf die Frage warten
+        awaitingCommand = true;
+        clearTimeout(awaitTimer);
+        awaitTimer = setTimeout(() => { awaitingCommand = false; if (listening) setState("listening", "Wartet auf „Jarvis“"); }, 10000);
+        speak("Ja, Sir?");
+      }
     } else {
       awaitingCommand = false;
+      clearTimeout(awaitTimer);
       ask(finalText);
     }
   };
@@ -231,16 +245,26 @@ reactor.addEventListener("click", () => {
 });
 
 wakeToggle.addEventListener("change", () => {
+  try { localStorage.setItem("jarvis-wake", wakeToggle.checked ? "on" : "off"); } catch {}
   if (wakeToggle.checked) {
     wantListening = true; awaitingCommand = false;
     pauseRecognition();
     setTimeout(startListening, 300);
-    hint.textContent = "Sag „Jarvis“ und dann deine Frage, z. B. „Jarvis, wie spät ist es?“";
+    hint.textContent = HINT_WAKE;
   } else {
     wantListening = false; pauseRecognition();
-    hint.textContent = "Klicke auf den Reaktor oder drücke die Leertaste, um zu sprechen.";
+    hint.textContent = HINT_CLICK;
   }
 });
+
+// Beim Öffnen der Seite sofort auf „Hey Jarvis“ hören
+if (rec && wakeToggle.checked) {
+  hint.textContent = HINT_WAKE;
+  wantListening = true;
+  startListening();
+} else if (rec) {
+  hint.textContent = HINT_CLICK;
+}
 
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space" && document.activeElement !== input) {

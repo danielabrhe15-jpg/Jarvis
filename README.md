@@ -4,7 +4,7 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 
 - 🎙️ **Spracheingabe** auf Deutsch (Klick auf den Reaktor oder Leertaste)
 - 🔊 **Sprachausgabe**: Jarvis liest seine Antworten vor, schon während er noch schreibt
-- 🗣️ **Wake-Word-Modus**: sag einfach „Jarvis, wie spät ist es?“
+- 🗣️ **„Hey Jarvis“**: hört automatisch zu, ohne Klick. Sag einfach „Hey Jarvis, wie spät ist es?“
 - ⚡ **Live-Streaming** der Antworten
 - 💾 Gesprächsverlauf bleibt im Browser gespeichert
 - 🌌 Arc-Reactor-Oberfläche im Jarvis-Look
@@ -38,7 +38,7 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 |---|---|
 | Sprechen | Auf den leuchtenden Reaktor klicken oder **Leertaste** drücken |
 | Schreiben | Text unten eingeben und **Senden** |
-| Wake-Word | Haken bei „Wake-Word Jarvis“ setzen, dann „Jarvis, …“ sagen |
+| Hey Jarvis | Einfach „Hey Jarvis, …“ sagen, Jarvis hört automatisch zu, sobald die Seite offen ist (abschaltbar unten per Haken) |
 | Vorlesen stoppen | **Esc** |
 | Stimme wählen | Dropdown unten (zeigt die deutschen Stimmen deines Systems) |
 
