@@ -4,7 +4,7 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 
 - 🎙️ **Spracheingabe** auf Deutsch (Klick auf den Reaktor oder Leertaste)
 - 🔊 **Sprachausgabe**: Jarvis liest seine Antworten vor, schon während er noch schreibt
-- 🗣️ **„Hey Jarvis“**: hört automatisch zu, ohne Klick. Sag einfach „Hey Jarvis, wie spät ist es?“
+- 🗣️ **„Jarvis“**: hört automatisch zu, ohne Klick. Sag einfach „Jarvis, wie spät ist es?“ oder „Wie spät ist es, Jarvis?“
 - ⚡ **Live-Streaming** der Antworten
 - 💾 Gesprächsverlauf bleibt im Browser gespeichert
 - 🌌 Arc-Reactor-Oberfläche im Jarvis-Look
@@ -36,7 +36,7 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 
 | Sag zum Beispiel | Was passiert |
 |---|---|
-| „Hey Jarvis, wie wird das Wetter morgen in Berlin?“ | Aktuelle Vorhersage (Open-Meteo) |
+| „Jarvis, wie wird das Wetter morgen in Berlin?“ | Aktuelle Vorhersage (Open-Meteo) |
 | „Was gibt's Neues?“ | Schlagzeilen von tagesschau.de |
 | „Stell einen Timer auf 5 Minuten für Nudeln.“ | Timer mit Ton und Ansage |
 | „Öffne YouTube“ / „Such bei Google nach …“ | Öffnet die Seite im Browser |
@@ -47,11 +47,13 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 | „Spiel Musik“ / „Nächstes Lied“ | Steuert Spotify oder Apple Musik |
 | „Stopp“ / „Ruhe“ (während er spricht) | Jarvis ist sofort still |
 
-Nach jeder Antwort hört Jarvis 8 Sekunden weiter zu, du kannst also ohne „Hey Jarvis“ nachfragen. Wetter und Nachrichten brauchen keinen eigenen Key. Werkzeuge gibt es derzeit mit Gemini.
+Jarvis reagiert nur, wenn du seinen Namen sagst, damit er nicht in Gespräche hineinredet. Wetter und Nachrichten brauchen keinen eigenen Key. Werkzeuge gibt es derzeit mit Gemini.
 
 ## Natürlichere Stimme mit Fish Audio (optional)
 
 Trag in `.env` deinen Key von <https://fish.audio/app/api-keys> als `FISH_API_KEY` ein und als `FISH_VOICE_ID` die ID einer Stimme (das Ende der Adresse `fish.audio/m/…`). Ohne Fish Audio oder wenn das Guthaben leer ist, liest der Browser vor.
+
+Mit Fish Audio gibt es unten auf der Seite ein Stimmen-Menü (deutsche Jarvis-Stimmen, mit Probesatz) und ein Tempo-Menü. Die Auswahl merkt sich der Browser. Das Standard-Tempo stellst du mit `FISH_SPEED` ein.
 
 ## Bedienung
 
@@ -59,9 +61,9 @@ Trag in `.env` deinen Key von <https://fish.audio/app/api-keys> als `FISH_API_KE
 |---|---|
 | Sprechen | Auf den leuchtenden Reaktor klicken oder **Leertaste** drücken |
 | Schreiben | Text unten eingeben und **Senden** |
-| Hey Jarvis | Einfach „Hey Jarvis, …“ sagen, Jarvis hört automatisch zu, sobald die Seite offen ist (abschaltbar unten per Haken) |
+| Jarvis rufen | Einfach „Jarvis, …“ sagen, Jarvis hört automatisch zu, sobald die Seite offen ist (abschaltbar unten per Haken) |
 | Vorlesen stoppen | **Esc** |
-| Stimme wählen | Dropdown unten (zeigt die deutschen Stimmen deines Systems) |
+| Stimme und Tempo | Menüs unten (mit Fish Audio die Fish-Stimmen, sonst die deutschen Stimmen deines Systems) |
 
 ## Einstellungen (`.env`)
 
@@ -76,6 +78,12 @@ Trag in `.env` deinen Key von <https://fish.audio/app/api-keys> als `FISH_API_KE
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Claude-Modell, z. B. `claude-sonnet-5-5` |
 | `PORT` | `3000` | Port des Servers |
 | `USER_NAME` | `Sir` | Wie Jarvis dich anspricht |
+| `GEMINI_FALLBACKS` | `gemini-3.1-flash-lite,…` | Ausweich-Modelle, wenn das Gratis-Limit eines Modells voll ist |
+| `FISH_SPEED` | `1.1` | Sprechtempo der Fish-Stimme |
+
+## Autostart auf dem Mac (optional)
+
+Damit Jarvis beim Einschalten von selbst startet, legst du in `~/Library/LaunchAgents/` eine Datei `com.jarvis.server.plist` an, die `node server.js` im Jarvis-Ordner mit `RunAtLoad` und `KeepAlive` startet. Wichtig: Lege den Jarvis-Ordner dafür nicht in „Dokumente“, „Schreibtisch“ oder „Downloads“, sonst blockiert macOS den Zugriff beim Start. Neu starten: `launchctl kickstart -k gui/$(id -u)/com.jarvis.server`. Abschalten: `launchctl bootout gui/$(id -u)/com.jarvis.server` und die Datei löschen.
 
 ## Projektstruktur
 

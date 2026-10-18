@@ -39,7 +39,7 @@ let voices = [];
 let speakQueue = 0;
 
 function loadVoices() {
-  if (!synth) return;
+  if (!synth || fishOn) return;
   voices = synth.getVoices();
   const de = voices.filter((v) => v.lang.toLowerCase().startsWith("de"));
   const list = de.length ? de : voices;
@@ -68,14 +68,41 @@ if (synth) {
   ttsToggle.checked = false; ttsToggle.disabled = true;
   voiceSelect.style.display = "none";
 }
-voiceSelect.onchange = () => localStorage.setItem("jarvis-voice", voiceSelect.value);
+voiceSelect.onchange = () => {
+  localStorage.setItem(fishOn ? "jarvis-fish-voice" : "jarvis-voice", voiceSelect.value);
+  stopSpeaking(); speak("Guten Tag, Sir. So klinge ich jetzt.");
+};
 
-// Fish Audio: wird genutzt, wenn der Server einen FISH_API_KEY hat
+// Fish Audio: wird genutzt, wenn der Server einen FISH_API_KEY hat. Dann gibt es eine
+// Auswahl an Fish-Stimmen und ein Sprechtempo, beides wird im Browser gespeichert.
 let fishOn = false;
-fetch("/api/health").then((r) => r.json()).then((j) => {
+const speedSelect = document.createElement("select");
+speedSelect.title = "Sprechtempo";
+[["0.9", "Tempo langsam"], ["1", "Tempo normal"], ["1.1", "Tempo zügig"], ["1.2", "Tempo schnell"], ["1.35", "Tempo sehr schnell"]]
+  .forEach(([v, t]) => speedSelect.add(new Option(t, v)));
+speedSelect.value = localStorage.getItem("jarvis-speed") || "1.1";
+speedSelect.style.display = "none";
+speedSelect.onchange = () => {
+  localStorage.setItem("jarvis-speed", speedSelect.value);
+  stopSpeaking(); speak("So schnell spreche ich jetzt, Sir.");
+};
+voiceSelect.after(speedSelect);
+
+fetch("/api/health").then((r) => r.json()).then(async (j) => {
   fishOn = j.tts === "fish";
-  if (fishOn) { voiceSelect.style.display = "none"; ttsToggle.disabled = false; }
+  if (!fishOn) return;
+  ttsToggle.disabled = false;
+  speedSelect.style.display = "";
+  const { voices: list = [], default: def } = await fetch("/api/voices").then((r) => r.json()).catch(() => ({}));
+  if (!list.length) { voiceSelect.style.display = "none"; return; }
+  voiceSelect.innerHTML = "";
+  if (def && !list.some((v) => v.id === def)) list.unshift({ id: def, name: "Standard-Stimme" });
+  list.forEach((v) => voiceSelect.add(new Option(v.id === def ? `${v.name} (Standard)` : v.name, v.id)));
+  voiceSelect.value = localStorage.getItem("jarvis-fish-voice") || def || list[0].id;
+  voiceSelect.style.display = "";
 }).catch(() => {});
+const ttsUrl = (text) =>
+  `/api/tts?text=${encodeURIComponent(text)}&speed=${speedSelect.value}` + (voiceSelect.value ? `&voice=${voiceSelect.value}` : "");
 
 let lastSpokeEnd = 0, lastAnswer = "";
 let speakGen = 0, currentAudio = null, audioChain = Promise.resolve();
@@ -112,7 +139,7 @@ function speak(text) {
   // Fish-Audio sofort anfordern, damit der Satz bereitliegt, wenn er dran ist
   let audio = null;
   if (fishOn) {
-    audio = new Audio(`/api/tts?text=${encodeURIComponent(text)}`);
+    audio = new Audio(ttsUrl(text));
     audio.preload = "auto";
   }
   audioChain = audioChain.then(async () => {
@@ -123,7 +150,7 @@ function speak(text) {
   }).finally(() => {
     if (gen !== speakGen) return;
     speakQueue = Math.max(0, speakQueue - 1);
-    if (speakQueue === 0 && !busy) { lastSpokeEnd = Date.now(); setState(null); openFollowUp(); resumeRecognition(); }
+    if (speakQueue === 0 && !busy) { lastSpokeEnd = Date.now(); setState(null); resumeRecognition(); }
   });
 }
 
@@ -144,7 +171,7 @@ function beep() {
   } catch {}
 }
 
-// Nach einer Antwort kurz ohne „Hey Jarvis“ weiterhören, damit man einfach weiterreden kann
+// Nach einem bloßen „Jarvis“ kurz auf die Frage warten
 function openFollowUp(ms = 8000) {
   if (!wakeToggle.checked) return;
   awaitingCommand = true;
@@ -225,7 +252,7 @@ async function ask(text) {
     setState("error", "Fehler");
   } finally {
     busy = false;
-    if (speakQueue === 0 && !statusEl.classList.contains("error")) { setState(null); openFollowUp(); resumeRecognition(); }
+    if (speakQueue === 0 && !statusEl.classList.contains("error")) { setState(null); resumeRecognition(); }
   }
 }
 
@@ -250,7 +277,7 @@ function dbg(event, detail = "") {
 // ---------- Spracheingabe ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false, wantListening = false, awaitingCommand = false, awaitTimer = null;
-const HINT_WAKE = "Sag „Hey Jarvis“ und dann deine Frage, z. B. „Hey Jarvis, wie spät ist es?“";
+const HINT_WAKE = "Sag „Jarvis“ und dann deine Frage, z. B. „Jarvis, wie spät ist es?“";
 const HINT_CLICK = "Klicke auf den Reaktor oder drücke die Leertaste, um zu sprechen.";
 try { if (localStorage.getItem("jarvis-wake") === "off") wakeToggle.checked = false; } catch {}
 
@@ -283,7 +310,7 @@ if (!SR) {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
       wantListening = false;
       // Der Browser will einmal einen Klick sehen, bevor er das Mikrofon freigibt
-      hint.textContent = "Klicke einmal irgendwo auf die Seite und erlaube das Mikrofon, dann hört Jarvis auf „Hey Jarvis“.";
+      hint.textContent = "Klicke einmal irgendwo auf die Seite und erlaube das Mikrofon, dann hört Jarvis auf seinen Namen.";
       document.addEventListener("click", () => {
         if (wakeToggle.checked) { wantListening = true; hint.textContent = HINT_WAKE; startListening(); }
       }, { once: true });
@@ -297,7 +324,7 @@ if (!SR) {
     }
     // Während Jarvis spricht, nur auf „Stopp“ hören, sonst hört er sich selbst
     if (speakQueue > 0 || busy) {
-      if (isStopCommand(finalText + " " + interim)) { stopSpeaking(); beep(); openFollowUp(); }
+      if (isStopCommand(finalText + " " + interim)) { stopSpeaking(); beep(); }
       return;
     }
     // Nachhall der eigenen Stimme kurz nach dem Sprechen ignorieren
@@ -313,7 +340,7 @@ if (!SR) {
       if (cmd === null) return;
       if (cmd) ask(cmd);
       else {
-        // Nur „Hey Jarvis“ gesagt: kurz bestätigen und auf die Frage warten
+        // Nur „Jarvis“ gesagt: kurz bestätigen und auf die Frage warten
         openFollowUp(10000);
         beep();
         setState("listening", "Hört zu");
@@ -333,13 +360,15 @@ const HEY_LIKE = /^(hey|hei|hej|hay|he|hi|hallo|ey|okay|ok)$/;
 function findWakeWord(text) {
   const words = text.trim().split(/\s+/);
   const norm = (w) => (w || "").toLowerCase().replace(/[^a-zäöüß]/g, "");
+  const clean = (ws) => ws.join(" ").replace(/^[,.!?\s]+|[,\s]+$/g, "").trim();
   for (let i = 0; i < words.length; i++) {
     const w = norm(words[i]);
-    const next = norm(words[i + 1]);
-    if (JARVIS_LIKE.test(w) && w.length >= 4) return words.slice(i + 1).join(" ").replace(/^[,.!?\s]+/, "").trim();
-    if (HEY_LIKE.test(w) && next && (JARVIS_LIKE.test(next) || /^(j|dsch|tsch|sch|ch|sh|g)/.test(next))) {
-      return words.slice(i + 2).join(" ").replace(/^[,.!?\s]+/, "").trim();
-    }
+    if (!(JARVIS_LIKE.test(w) && w.length >= 4)) continue;
+    const after = clean(words.slice(i + 1));
+    if (after) return after;
+    // „Wie spät ist es, Jarvis?“: Name am Ende, Frage davor
+    const before = clean(words.slice(0, i).filter((x) => !HEY_LIKE.test(norm(x))));
+    return before.split(" ").length >= 2 ? before : "";
   }
   return null;
 }
@@ -416,7 +445,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") resumeRecognition();
 });
 
-// Beim Öffnen der Seite sofort auf „Hey Jarvis“ hören
+// Beim Öffnen der Seite sofort auf „Jarvis“ hören
 if (rec && wakeToggle.checked) {
   hint.textContent = HINT_WAKE;
   wantListening = true;
