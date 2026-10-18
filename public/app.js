@@ -208,6 +208,14 @@ $("clearBtn").onclick = () => {
   history = []; save(); log.innerHTML = ""; stopSpeaking(); setState(null);
 };
 
+// ---------- Diagnose: schreibt Mikrofon-Ereignisse ins Terminal (npm start) ----------
+function dbg(event, detail = "") {
+  try {
+    fetch("/api/debug", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, detail: String(detail).slice(0, 300) }) }).catch(() => {});
+  } catch {}
+}
+
 // ---------- Spracheingabe ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false, wantListening = false, awaitingCommand = false, awaitTimer = null;
@@ -216,6 +224,7 @@ const HINT_CLICK = "Klicke auf den Reaktor oder drücke die Leertaste, um zu spr
 try { if (localStorage.getItem("jarvis-wake") === "off") wakeToggle.checked = false; } catch {}
 
 if (!SR) {
+  dbg("no-speech-recognition", navigator.userAgent);
   hint.textContent = "Dein Browser unterstützt keine Spracheingabe. Nutze Chrome oder Edge, oder tippe unten.";
   wakeToggle.disabled = true;
 } else {
@@ -224,15 +233,18 @@ if (!SR) {
   rec.interimResults = true;
 
   rec.onstart = () => {
+    dbg("start");
     listening = true;
     if (!busy && speakQueue === 0) setState("listening", wakeToggle.checked && !awaitingCommand ? "Wartet auf „Jarvis“" : "Hört zu");
   };
   rec.onend = () => {
+    dbg("end");
     listening = false;
     if (!busy && speakQueue === 0) setState(null);
     if (wantListening && wakeToggle.checked) setTimeout(resumeRecognition, 300);
   };
   rec.onerror = (e) => {
+    dbg("error", e.error);
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
       wantListening = false;
       // Der Browser will einmal einen Klick sehen, bevor er das Mikrofon freigibt
@@ -252,6 +264,7 @@ if (!SR) {
     if (!finalText) return;
     input.placeholder = "Nachricht an Jarvis…";
     showHeard(finalText);
+    dbg("heard", finalText);
 
     if (wakeToggle.checked && !awaitingCommand) {
       const cmd = findWakeWord(finalText);
@@ -303,7 +316,7 @@ function startListening() {
   if (!rec || listening) return;
   stopSpeaking();
   rec.continuous = wakeToggle.checked;
-  try { rec.start(); } catch {}
+  try { rec.start(); } catch (err) { dbg("start-failed", err.message); }
 }
 function pauseRecognition() { if (rec && listening) { try { rec.abort(); } catch {} } }
 function resumeRecognition() {
@@ -328,6 +341,13 @@ wakeToggle.addEventListener("change", () => {
     wantListening = false; pauseRecognition();
     hint.textContent = HINT_CLICK;
   }
+});
+
+// Falls die Erkennung unbemerkt stoppt (z. B. wenn der Tab im Hintergrund war): alle 3 Sekunden neu starten
+setInterval(resumeRecognition, 3000);
+document.addEventListener("visibilitychange", () => {
+  dbg("visibility", document.visibilityState);
+  if (document.visibilityState === "visible") resumeRecognition();
 });
 
 // Beim Öffnen der Seite sofort auf „Hey Jarvis“ hören

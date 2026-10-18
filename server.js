@@ -210,6 +210,13 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
+// Diagnose: Mikrofon-Ereignisse aus dem Browser im Terminal anzeigen
+app.post("/api/debug", (req, res) => {
+  const { event = "", detail = "" } = req.body || {};
+  console.log(`[Mikrofon] ${new Date().toLocaleTimeString("de-DE")} ${String(event).slice(0, 40)} ${String(detail).slice(0, 300)}`);
+  res.json({ ok: true });
+});
+
 app.post("/api/chat", async (req, res) => {
   const messages = sanitize(req.body?.messages);
   if (!messages.length || messages.at(-1).role !== "user") {
