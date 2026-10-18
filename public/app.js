@@ -190,13 +190,18 @@ function visualize(a) {
     a.addEventListener("playing", () => { levelLoop = requestAnimationFrame(step); }, { once: true });
   } catch {}
 }
-function playAudio(a) {
+function playAudio(a, text = "") {
   return new Promise((resolve, reject) => {
     currentAudio = a;
     visualize(a);
-    a.onended = () => { document.documentElement.style.setProperty("--level", 0); resolve(); };
-    a.onerror = () => reject(new Error("Audio-Fehler"));
-    a.play().catch(reject);
+    // Sicherheitsnetz: hängt der Ton (Netz weg, Stream bricht ab), nach einer
+    // großzügigen Zeit aufgeben, sonst würde Jarvis danach nicht mehr zuhören
+    const limit = 8000 + text.length * 120;
+    const watchdog = setTimeout(() => { dbg("audio-watchdog"); a.pause(); resolve(); }, limit);
+    const done = (fn) => (...x) => { clearTimeout(watchdog); document.documentElement.style.setProperty("--level", 0); fn(...x); };
+    a.onended = done(resolve);
+    a.onerror = done(() => reject(new Error("Audio-Fehler")));
+    a.play().catch(done(reject));
   });
 }
 
@@ -215,7 +220,7 @@ function speak(text) {
   audioChain = audioChain.then(async () => {
     if (gen !== speakGen) return;
     if (!audio) return speakBrowser(text);
-    try { await playAudio(audio); }
+    try { await playAudio(audio, text); }
     catch (err) { console.warn("Fish Audio:", err.message); if (gen === speakGen) await speakBrowser(text); }
   }).finally(() => {
     if (gen !== speakGen) return;
@@ -278,6 +283,7 @@ async function ask(text) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages: history.slice(-20) }),
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok || !res.body) {
       const j = await res.json().catch(() => ({}));
@@ -348,7 +354,7 @@ function dbg(event, detail = "") {
 
 // ---------- Spracheingabe ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, listening = false, wantListening = false, awaitingCommand = false, awaitTimer = null, ackTimer = null;
+let rec = null, listening = false, wantListening = false, awaitingCommand = false, awaitTimer = null, ackTimer = null, ackActive = false;
 const HINT_WAKE = "Sag „Jarvis“ und dann deine Frage, z. B. „Jarvis, wie spät ist es?“";
 const HINT_CLICK = "Klicke auf den Reaktor oder drücke die Leertaste, um zu sprechen.";
 try { if (localStorage.getItem("jarvis-wake") === "off") wakeToggle.checked = false; } catch {}
@@ -371,13 +377,13 @@ if (!SR) {
     dbg("end");
     listening = false;
     if (!busy && speakQueue === 0) setState(null);
-    if (wantListening && wakeToggle.checked) setTimeout(resumeRecognition, 300);
+    if (wantListening && wakeToggle.checked) setTimeout(resumeRecognition, 50);
   };
   rec.onerror = (e) => {
     dbg("error", e.error);
     if (e.error === "audio-capture") {
       // Mikrofon da, aber kein Ton: meist hat der Mac Chrome den Zugriff nicht erlaubt
-      hint.textContent = "Kein Ton vom Mikrofon. Prüfe unter chrome://settings/content/microphone, dass das eingebaute Mikrofon gewählt ist (nicht das iPhone), und am Mac unter Datenschutz & Sicherheit → Mikrofon, dass Chrome erlaubt ist.";
+      hint.textContent = "Kein Ton vom Mikrofon. Ist der MacBook-Deckel zu (z. B. mit externem Bildschirm)? Dann ist das eingebaute Mikrofon aus. Sonst unter chrome://settings/content/microphone das MacBook-Mikrofon wählen.";
     }
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
       wantListening = false;
@@ -397,8 +403,13 @@ if (!SR) {
     // Folien steuern („weiter“, „zurück“, „schließen“) geht auch, während Jarvis spricht
     if (finalText && slideVoiceCommand(finalText)) { if (speakQueue > 0) stopSpeaking(); return; }
     // Während Jarvis spricht, nur auf „Stopp“ hören, sonst hört er sich selbst
-    if (speakQueue > 0 || busy) {
-      if (isStopCommand(finalText + " " + interim)) { stopSpeaking(); beep(); }
+    if (finalText && /^\s*ja,?\s*chef\W*$/i.test(finalText)) return; // eigenes „Ja, Chef?“
+    if ((speakQueue > 0 && !ackActive) || busy) {
+      if (isStopCommand(finalText + " " + interim)) { stopSpeaking(); beep(); return; }
+      // Neue Frage mit „Jarvis …“, während er noch redet: aufhören und die neue Frage beantworten
+      const cmd = !busy && finalText && !/jarvis/i.test(lastAnswerNow()) ? findWakeWord(finalText) : null;
+      if (cmd) { dbg("unterbrochen"); stopSpeaking(); ask(cmd); return; }
+      if (finalText) dbg(busy ? "ignoriert-denkt" : "ignoriert-spricht");
       return;
     }
     // Nachhall der eigenen Stimme kurz nach dem Sprechen ignorieren
@@ -414,17 +425,23 @@ if (!SR) {
     if (wakeToggle.checked && !awaitingCommand) {
       const cmd = findWakeWord(finalText);
       if (cmd === null) return;
+      dbg("wake", cmd ? "mit Frage" : "nur Name");
       if (cmd) ask(cmd);
       else {
         // Nur „Jarvis“ gesagt: auf die Frage warten. Kommt kurz nichts, „Ja, Chef?“ sagen
         openFollowUp(10000);
         setState("listening", "Hört zu");
         clearTimeout(ackTimer);
-        ackTimer = setTimeout(() => { if (awaitingCommand && !busy) speak(ACK); }, 900);
+        ackTimer = setTimeout(() => {
+          if (!awaitingCommand || busy) return;
+          ackActive = true; setTimeout(() => (ackActive = false), 2500);
+          speak(ACK);
+        }, 900);
       }
     } else {
-      awaitingCommand = false;
+      awaitingCommand = false; ackActive = false;
       clearTimeout(awaitTimer);
+      if (speakQueue > 0) stopSpeaking(); // „Ja, Chef?“ abbrechen, die Frage ist da
       ask(finalText);
     }
   };
