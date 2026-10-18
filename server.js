@@ -191,7 +191,7 @@ async function tts(rawText, res) {
       method: "POST",
       signal: controller.signal,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FISH_API_KEY}`, model: FISH.model },
-      body: JSON.stringify({ text, reference_id: FISH.voice, format: "mp3", latency: "balanced", language: "de" }),
+      body: JSON.stringify({ text, reference_id: FISH.voice, format: "mp3", latency: "low", language: "de" }),
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
