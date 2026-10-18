@@ -408,12 +408,19 @@ if (!SR) {
       if (isStopCommand(finalText + " " + interim)) { stopSpeaking(); beep(); return; }
       // Neue Frage mit „Jarvis …“, während er noch redet: aufhören und die neue Frage beantworten
       const cmd = !busy && finalText && !/jarvis/i.test(lastAnswerNow()) ? findWakeWord(finalText) : null;
-      if (cmd) { dbg("unterbrochen"); stopSpeaking(); ask(cmd); return; }
+      if (cmd) { dbg("unterbrochen"); stopSpeaking(); collect(cmd); return; }
       if (finalText) dbg(busy ? "ignoriert-denkt" : "ignoriert-spricht");
       return;
     }
     // Nachhall der eigenen Stimme kurz nach dem Sprechen ignorieren
     if (finalText && isEcho(finalText)) return;
+    // Nach „Jarvis“ wird gesammelt, bis du eine kurze Pause machst – so kannst du ausreden
+    if (collecting) {
+      if (finalText) cmdBuf = `${cmdBuf} ${finalText}`.trim();
+      showLive(`${cmdBuf} ${interim}`.trim());
+      armSilence();
+      return;
+    }
     // Redet der Nutzer nach „Jarvis“ weiter, keine Bestätigung
     if (interim || finalText) clearTimeout(ackTimer);
     if (interim) input.placeholder = interim;
@@ -426,7 +433,7 @@ if (!SR) {
       const cmd = findWakeWord(finalText);
       if (cmd === null) return;
       dbg("wake", cmd ? "mit Frage" : "nur Name");
-      if (cmd) ask(cmd);
+      if (cmd) collect(cmd);
       else {
         // Nur „Jarvis“ gesagt: auf die Frage warten. Kommt kurz nichts, „Ja, Chef?“ sagen
         openFollowUp(10000);
@@ -442,9 +449,35 @@ if (!SR) {
       awaitingCommand = false; ackActive = false;
       clearTimeout(awaitTimer);
       if (speakQueue > 0) stopSpeaking(); // „Ja, Chef?“ abbrechen, die Frage ist da
-      ask(finalText);
+      collect(finalText);
     }
   };
+}
+
+// ---------- Ausreden lassen ----------
+// Chrome schließt einen Satzteil schon bei kleinen Pausen ab. Deshalb sammelt Jarvis nach
+// seinem Namen alles Gesagte und fragt erst, wenn du SILENCE_MS lang nichts mehr sagst.
+const SILENCE_MS = 1300;
+let collecting = false, cmdBuf = "", silenceTimer = null;
+function collect(text) {
+  collecting = true;
+  cmdBuf = text.trim();
+  clearTimeout(ackTimer);
+  setState("listening", "Hört zu");
+  showLive(cmdBuf);
+  armSilence();
+}
+function armSilence() {
+  clearTimeout(silenceTimer);
+  silenceTimer = setTimeout(() => {
+    const q = cmdBuf.trim();
+    collecting = false; cmdBuf = "";
+    if (q) ask(q); else setState(null);
+  }, SILENCE_MS);
+}
+function showLive(text) {
+  heardEl.textContent = text ? `„${text} …“` : "";
+  heardEl.classList.toggle("show", !!text);
 }
 
 // Die deutsche Spracherkennung schreibt „Jarvis“ oft anders (Javis, Dschawis, Charvis …).
