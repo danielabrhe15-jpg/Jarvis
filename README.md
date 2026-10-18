@@ -32,6 +32,20 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 | **Ollama** | kostenlos, offline, unbegrenzt | <https://ollama.com> installieren, `ollama pull llama3.2`, in `.env` `PROVIDER=ollama` setzen. Braucht einen halbwegs starken PC. |
 | **Claude** | kostenpflichtig | Key von <https://console.anthropic.com> in `ANTHROPIC_API_KEY` |
 
+## Was Jarvis kann
+
+| Sag zum Beispiel | Was passiert |
+|---|---|
+| „Hey Jarvis, wie wird das Wetter morgen in Berlin?“ | Aktuelle Vorhersage (Open-Meteo) |
+| „Was gibt's Neues?“ | Schlagzeilen von tagesschau.de |
+| „Stell einen Timer auf 5 Minuten für Nudeln.“ | Timer mit Ton und Ansage |
+| „Öffne YouTube“ / „Such bei Google nach …“ | Öffnet die Seite im Browser |
+| „Spiel Musik von Drake auf YouTube“ | Öffnet die YouTube-Suche |
+| „Öffne Spotify“ / „Öffne Notizen“ | Öffnet eine installierte Mac-App |
+| „Stopp“ / „Ruhe“ (während er spricht) | Jarvis ist sofort still |
+
+Nach jeder Antwort hört Jarvis 8 Sekunden weiter zu, du kannst also ohne „Hey Jarvis“ nachfragen. Wetter und Nachrichten brauchen keinen eigenen Key. Werkzeuge gibt es derzeit mit Gemini.
+
 ## Natürlichere Stimme mit Fish Audio (optional)
 
 Trag in `.env` deinen Key von <https://fish.audio/app/api-keys> als `FISH_API_KEY` ein und als `FISH_VOICE_ID` die ID einer Stimme (das Ende der Adresse `fish.audio/m/…`). Ohne Fish Audio oder wenn das Guthaben leer ist, liest der Browser vor.

@@ -77,6 +77,7 @@ fetch("/api/health").then((r) => r.json()).then((j) => {
   if (fishOn) { voiceSelect.style.display = "none"; ttsToggle.disabled = false; }
 }).catch(() => {});
 
+let lastSpokeEnd = 0, lastAnswer = "";
 let speakGen = 0, currentAudio = null, audioChain = Promise.resolve();
 
 function speakBrowser(text) {
@@ -107,7 +108,6 @@ function speak(text) {
   if (!ttsToggle.checked || !text.trim() || (!fishOn && !synth)) return;
   const gen = speakGen;
   speakQueue++;
-  pauseRecognition();
   setState("speaking", "Spricht");
   // Fish-Audio sofort anfordern, damit der Satz bereitliegt, wenn er dran ist
   let audio = null;
@@ -123,7 +123,7 @@ function speak(text) {
   }).finally(() => {
     if (gen !== speakGen) return;
     speakQueue = Math.max(0, speakQueue - 1);
-    if (speakQueue === 0 && !busy) { setState(null); openFollowUp(); resumeRecognition(); }
+    if (speakQueue === 0 && !busy) { lastSpokeEnd = Date.now(); setState(null); openFollowUp(); resumeRecognition(); }
   });
 }
 
@@ -153,7 +153,9 @@ function openFollowUp(ms = 8000) {
 }
 function stopSpeaking() {
   speakGen++;
+  if (speakQueue > 0) lastSpokeEnd = Date.now();
   speakQueue = 0;
+  if (!busy) setState(null);
   audioChain = Promise.resolve();
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   if (synth) synth.cancel();
@@ -205,12 +207,15 @@ async function ask(text) {
           const m = pending.match(/^([\s\S]*[.!?…])(\s+)([\s\S]*)$/) ||
             (!spokeFirst && pending.length > 60 ? pending.match(/^([\s\S]*[,;:])(\s+)([\s\S]*)$/) : null);
           if (m && (!spokeFirst || m[1].length > 160)) { speak(m[1]); pending = m[3]; spokeFirst = true; }
+        } else if (type === "timer") {
+          startTimer(data.sekunden, data.bezeichnung);
         } else if (type === "error") {
           throw new Error(data.message);
         }
       }
     }
     speak(pending);
+    lastAnswer = full;
     history.push({ role: "assistant", content: full });
     save();
   } catch (err) {
@@ -290,6 +295,13 @@ if (!SR) {
       const r = e.results[i];
       if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
     }
+    // Während Jarvis spricht, nur auf „Stopp“ hören, sonst hört er sich selbst
+    if (speakQueue > 0 || busy) {
+      if (isStopCommand(finalText + " " + interim)) { stopSpeaking(); beep(); openFollowUp(); }
+      return;
+    }
+    // Nachhall der eigenen Stimme kurz nach dem Sprechen ignorieren
+    if (finalText && isEcho(finalText)) return;
     if (interim) input.placeholder = interim;
     if (!finalText) return;
     input.placeholder = "Nachricht an Jarvis…";
@@ -341,18 +353,43 @@ function showHeard(text) {
   heardTimer = setTimeout(() => { hint.textContent = HINT_WAKE; }, 4000);
 }
 
+// „Stopp“, „Ruhe“, „Aufhören“ … unterbricht Jarvis, aber nur, wenn er das Wort nicht selbst gerade sagt
+const STOP_WORDS = /\b(stopp?|ruhe|aufhören|hör auf|sei still|abbrechen|genug|halt stopp)\b/i;
+function isStopCommand(text) {
+  const m = text.toLowerCase().match(STOP_WORDS);
+  return !!m && !lastAnswerNow().toLowerCase().includes(m[1]);
+}
+const lastAnswerNow = () => (busy ? log.lastElementChild?.textContent || "" : lastAnswer);
+function isEcho(text) {
+  if (Date.now() - lastSpokeEnd > 2500) return false;
+  const norm = (t) => t.toLowerCase().replace(/[^a-zäöüß0-9 ]/g, "").trim();
+  const t = norm(text);
+  return !!t && norm(lastAnswer).includes(t);
+}
+
+// Timer: läuft im Browser, am Ende drei Töne und eine Ansage
+function startTimer(sekunden, bezeichnung) {
+  const name = bezeichnung ? `für ${bezeichnung} ` : "";
+  setTimeout(() => {
+    [0, 400, 800].forEach((ms) => setTimeout(beep, ms));
+    const text = `Sir, Ihr Timer ${name}ist abgelaufen.`;
+    addMsg("assistant", text);
+    setTimeout(() => speak(text), 1200);
+  }, sekunden * 1000);
+}
+
 function startListening() {
   if (!rec || listening) return;
-  stopSpeaking();
   rec.continuous = wakeToggle.checked;
   try { rec.start(); } catch (err) { dbg("start-failed", err.message); }
 }
 function pauseRecognition() { if (rec && listening) { try { rec.abort(); } catch {} } }
 function resumeRecognition() {
-  if (rec && wantListening && wakeToggle.checked && !listening && !busy && speakQueue === 0) startListening();
+  if (rec && wantListening && wakeToggle.checked && !listening) startListening();
 }
 
 reactor.addEventListener("click", () => {
+  if (speakQueue > 0) { stopSpeaking(); return; }
   if (!rec) return;
   if (listening && !wakeToggle.checked) { rec.stop(); return; }
   wantListening = true;

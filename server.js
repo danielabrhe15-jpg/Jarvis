@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
+import { toolDeclarations, runTool } from "./tools.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +53,7 @@ Persönlichkeit: höflich, loyal, ruhig, präzise, mit trockenem britischem Humo
 Deine Antworten werden laut vorgelesen. Halte dich deshalb kurz (meist 1 bis 3 Sätze), es sei denn, es wird ausdrücklich mehr verlangt.
 Verwende keine Markdown-Formatierung, keine Aufzählungszeichen, keine Emojis und keine Codeblöcke, außer der Nutzer bittet ausdrücklich um Code.
 Antworte in der Sprache, in der du angesprochen wirst (standardmäßig Deutsch).
+Du hast Werkzeuge: aktuelles Wetter, aktuelle Nachrichten, Webseiten öffnen, YouTube-Suche öffnen, Mac-Apps öffnen und Timer stellen. Nutze sie, statt zu sagen, dass du etwas nicht kannst. Erfinde nie Wetter- oder Nachrichtendaten. Fasse Werkzeug-Ergebnisse kurz und natürlich zusammen.
 Aktuelles Datum und Uhrzeit: ${now}.`;
 }
 
@@ -99,8 +101,9 @@ async function* streamClaude(messages, signal) {
   }
 }
 
-async function* streamGemini(messages, signal) {
+async function* streamGemini(messages, signal, emit) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:streamGenerateContent?alt=sse`;
+  const contents = messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
   const request = (fast) =>
     fetch(url, {
       method: "POST",
@@ -108,31 +111,46 @@ async function* streamGemini(messages, signal) {
       headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt() }] },
-        contents: messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+        contents,
+        tools: [{ functionDeclarations: toolDeclarations }],
         // "Nachdenken" aus: Jarvis antwortet dadurch deutlich schneller
         generationConfig: { maxOutputTokens: 2048, ...(fast && { thinkingConfig: { thinkingBudget: 0 } }) },
       }),
     });
-  let res = await request(true);
-  // Manche Modelle erlauben das Abschalten nicht, dann ohne erneut versuchen
-  if (res.status === 400) {
-    const text = await res.clone().text();
-    if (!/api key/i.test(text)) res = await request(false);
-  }
-  if (!res.ok) {
-    const j = await res.json().catch(() => ({}));
-    const msg = j?.error?.message || `HTTP ${res.status}`;
-    if (res.status === 400 && /api key/i.test(msg)) throw new ProviderError("Ungültiger Gemini API-Key.");
-    if (res.status === 429) throw new ProviderError("Kostenloses Gemini-Limit kurz erreicht. Warte eine Minute und versuch es nochmal.");
-    if (res.status === 404) throw new ProviderError(`Gemini-Modell "${MODEL}" nicht gefunden. Setze GEMINI_MODEL in .env auf ein anderes Modell.`);
-    throw new ProviderError(`Gemini-Fehler: ${msg}`);
-  }
-  for await (const line of lines(res.body)) {
-    if (!line.startsWith("data:")) continue;
-    const data = JSON.parse(line.slice(5));
-    for (const part of data?.candidates?.[0]?.content?.parts || []) {
-      if (part.text && !part.thought) yield part.text;
+
+  // Ruft Gemini ein Werkzeug auf (Wetter, Webseite …), führen wir es aus und fragen erneut
+  for (let round = 0; round < 4; round++) {
+    let res = await request(true);
+    // Manche Modelle erlauben das Abschalten nicht, dann ohne erneut versuchen
+    if (res.status === 400) {
+      const text = await res.clone().text();
+      if (!/api key/i.test(text)) res = await request(false);
     }
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      const msg = j?.error?.message || `HTTP ${res.status}`;
+      if (res.status === 400 && /api key/i.test(msg)) throw new ProviderError("Ungültiger Gemini API-Key.");
+      if (res.status === 429) throw new ProviderError("Kostenloses Gemini-Limit kurz erreicht. Warte eine Minute und versuch es nochmal.");
+      if (res.status === 404) throw new ProviderError(`Gemini-Modell "${MODEL}" nicht gefunden. Setze GEMINI_MODEL in .env auf ein anderes Modell.`);
+      throw new ProviderError(`Gemini-Fehler: ${msg}`);
+    }
+    const modelParts = [], calls = [];
+    for await (const line of lines(res.body)) {
+      if (!line.startsWith("data:")) continue;
+      const data = JSON.parse(line.slice(5));
+      for (const part of data?.candidates?.[0]?.content?.parts || []) {
+        modelParts.push(part);
+        if (part.functionCall) calls.push(part.functionCall);
+        else if (part.text && !part.thought) yield part.text;
+      }
+    }
+    if (!calls.length) return;
+    const results = await Promise.all(calls.map((c) => runTool(c.name, c.args, emit)));
+    contents.push({ role: "model", parts: modelParts });
+    contents.push({
+      role: "user",
+      parts: calls.map((c, i) => ({ functionResponse: { name: c.name, response: { result: results[i] } } })),
+    });
   }
 }
 
@@ -238,7 +256,7 @@ app.post("/api/chat", async (req, res) => {
   res.on("close", () => controller.abort());
 
   try {
-    for await (const text of providers[PROVIDER](messages, controller.signal)) send("delta", { text });
+    for await (const text of providers[PROVIDER](messages, controller.signal, send)) send("delta", { text });
     send("done", {});
   } catch (err) {
     if (!controller.signal.aborted) {
@@ -250,6 +268,8 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// Nur auf diesem Rechner erreichbar, damit niemand im WLAN Apps oder Webseiten öffnen kann
+const HOST = process.env.HOST || "127.0.0.1";
+app.listen(PORT, HOST, () => {
   console.log(`\n🤖 J.A.R.V.I.S. ist online: http://localhost:${PORT}  (Anbieter: ${PROVIDER}, Modell: ${MODEL})\n`);
 });
