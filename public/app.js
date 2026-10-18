@@ -93,13 +93,12 @@ function speakBrowser(text) {
   });
 }
 
-function playAudio(blob) {
+// Spielt eine Audio-Datei ab, sobald genug geladen ist (wartet nicht aufs komplette Laden)
+function playAudio(a) {
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    const a = new Audio(url);
     currentAudio = a;
-    a.onended = () => { URL.revokeObjectURL(url); resolve(); };
-    a.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Audio-Fehler")); };
+    a.onended = () => resolve();
+    a.onerror = () => reject(new Error("Audio-Fehler"));
     a.play().catch(reject);
   });
 }
@@ -110,22 +109,47 @@ function speak(text) {
   speakQueue++;
   pauseRecognition();
   setState("speaking", "Spricht");
-  // Audio schon jetzt anfordern, damit der nächste Satz bereitliegt
-  const audio = fishOn
-    ? fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) })
-        .then((r) => (r.ok ? r.blob() : r.json().then((j) => Promise.reject(new Error(j.error)))))
-    : null;
-  audio?.catch(() => {});
+  // Fish-Audio sofort anfordern, damit der Satz bereitliegt, wenn er dran ist
+  let audio = null;
+  if (fishOn) {
+    audio = new Audio(`/api/tts?text=${encodeURIComponent(text)}`);
+    audio.preload = "auto";
+  }
   audioChain = audioChain.then(async () => {
     if (gen !== speakGen) return;
     if (!audio) return speakBrowser(text);
-    try { await playAudio(await audio); }
+    try { await playAudio(audio); }
     catch (err) { console.warn("Fish Audio:", err.message); if (gen === speakGen) await speakBrowser(text); }
   }).finally(() => {
     if (gen !== speakGen) return;
     speakQueue = Math.max(0, speakQueue - 1);
-    if (speakQueue === 0 && !busy) { setState(null); resumeRecognition(); }
+    if (speakQueue === 0 && !busy) { setState(null); openFollowUp(); resumeRecognition(); }
   });
+}
+
+// Kurzer Ton als Zeichen, dass Jarvis zuhört (schneller als „Ja, Sir?“ vorzulesen)
+let audioCtx = null;
+function beep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(880, audioCtx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.12);
+    g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.2, audioCtx.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.26);
+  } catch {}
+}
+
+// Nach einer Antwort kurz ohne „Hey Jarvis“ weiterhören, damit man einfach weiterreden kann
+function openFollowUp(ms = 8000) {
+  if (!wakeToggle.checked) return;
+  awaitingCommand = true;
+  clearTimeout(awaitTimer);
+  awaitTimer = setTimeout(() => { awaitingCommand = false; if (listening) setState("listening", "Wartet auf „Jarvis“"); }, ms);
 }
 function stopSpeaking() {
   speakGen++;
@@ -153,7 +177,7 @@ async function ask(text) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: history }),
+      body: JSON.stringify({ messages: history.slice(-20) }),
     });
     if (!res.ok || !res.body) {
       const j = await res.json().catch(() => ({}));
@@ -177,7 +201,9 @@ async function ask(text) {
           el.textContent = full;
           log.scrollTop = log.scrollHeight;
           // Den ersten Satz sofort vorlesen, danach in größeren Stücken (klingt flüssiger)
-          const m = pending.match(/^([\s\S]*[.!?…])(\s+)([\s\S]*)$/);
+          // Den Anfang so früh wie möglich vorlesen (auch an einem Komma), danach in größeren Stücken
+          const m = pending.match(/^([\s\S]*[.!?…])(\s+)([\s\S]*)$/) ||
+            (!spokeFirst && pending.length > 60 ? pending.match(/^([\s\S]*[,;:])(\s+)([\s\S]*)$/) : null);
           if (m && (!spokeFirst || m[1].length > 160)) { speak(m[1]); pending = m[3]; spokeFirst = true; }
         } else if (type === "error") {
           throw new Error(data.message);
@@ -194,7 +220,7 @@ async function ask(text) {
     setState("error", "Fehler");
   } finally {
     busy = false;
-    if (speakQueue === 0 && !statusEl.classList.contains("error")) { setState(null); resumeRecognition(); }
+    if (speakQueue === 0 && !statusEl.classList.contains("error")) { setState(null); openFollowUp(); resumeRecognition(); }
   }
 }
 
@@ -268,7 +294,7 @@ if (!SR) {
     if (!finalText) return;
     input.placeholder = "Nachricht an Jarvis…";
     showHeard(finalText);
-    dbg("heard", finalText);
+    dbg("heard");
 
     if (wakeToggle.checked && !awaitingCommand) {
       const cmd = findWakeWord(finalText);
@@ -276,10 +302,9 @@ if (!SR) {
       if (cmd) ask(cmd);
       else {
         // Nur „Hey Jarvis“ gesagt: kurz bestätigen und auf die Frage warten
-        awaitingCommand = true;
-        clearTimeout(awaitTimer);
-        awaitTimer = setTimeout(() => { awaitingCommand = false; if (listening) setState("listening", "Wartet auf „Jarvis“"); }, 10000);
-        speak("Ja, Sir?");
+        openFollowUp(10000);
+        beep();
+        setState("listening", "Hört zu");
       }
     } else {
       awaitingCommand = false;

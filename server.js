@@ -175,8 +175,12 @@ const FISH = process.env.FISH_API_KEY
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, provider: PROVIDER, model: MODEL, tts: FISH ? "fish" : "browser" }));
 
-app.post("/api/tts", async (req, res) => {
-  const text = typeof req.body?.text === "string" ? req.body.text.trim().slice(0, 2000) : "";
+// GET erlaubt dem Browser, das Audio schon abzuspielen, während es noch lädt
+app.get("/api/tts", (req, res) => tts(String(req.query.text || ""), res));
+app.post("/api/tts", (req, res) => tts(typeof req.body?.text === "string" ? req.body.text : "", res));
+
+async function tts(rawText, res) {
+  const text = rawText.trim().slice(0, 2000);
   if (!FISH) return res.status(404).json({ error: "Fish Audio ist nicht eingerichtet (FISH_API_KEY fehlt in .env)." });
   if (!text) return res.status(400).json({ error: "Kein Text." });
 
@@ -208,7 +212,7 @@ app.post("/api/tts", async (req, res) => {
       else res.end();
     }
   }
-});
+}
 
 // Diagnose: Mikrofon-Ereignisse aus dem Browser im Terminal anzeigen
 app.post("/api/debug", (req, res) => {
