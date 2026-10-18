@@ -42,6 +42,9 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 | „Öffne YouTube“ / „Such bei Google nach …“ | Öffnet die Seite im Browser |
 | „Spiel Musik von Drake auf YouTube“ | Öffnet die YouTube-Suche |
 | „Öffne Spotify“ / „Öffne Notizen“ | Öffnet eine installierte Mac-App |
+| „Merk dir, dass ich am 5. März Geburtstag habe.“ | Jarvis merkt sich das dauerhaft (in `memory.json`, nur auf deinem Rechner) |
+| „Mach lauter“ / „Lautstärke auf 30 Prozent“ | Ändert die Mac-Lautstärke |
+| „Spiel Musik“ / „Nächstes Lied“ | Steuert Spotify oder Apple Musik |
 | „Stopp“ / „Ruhe“ (während er spricht) | Jarvis ist sofort still |
 
 Nach jeder Antwort hört Jarvis 8 Sekunden weiter zu, du kannst also ohne „Hey Jarvis“ nachfragen. Wetter und Nachrichten brauchen keinen eigenen Key. Werkzeuge gibt es derzeit mit Gemini.

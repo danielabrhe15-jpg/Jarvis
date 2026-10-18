@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
-import { toolDeclarations, runTool } from "./tools.js";
+import { toolDeclarations, runTool, loadMemory } from "./tools.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,8 +53,14 @@ Persönlichkeit: höflich, loyal, ruhig, präzise, mit trockenem britischem Humo
 Deine Antworten werden laut vorgelesen. Halte dich deshalb kurz (meist 1 bis 3 Sätze), es sei denn, es wird ausdrücklich mehr verlangt.
 Verwende keine Markdown-Formatierung, keine Aufzählungszeichen, keine Emojis und keine Codeblöcke, außer der Nutzer bittet ausdrücklich um Code.
 Antworte in der Sprache, in der du angesprochen wirst (standardmäßig Deutsch).
-Du hast Werkzeuge: aktuelles Wetter, aktuelle Nachrichten, Webseiten öffnen, YouTube-Suche öffnen, Mac-Apps öffnen und Timer stellen. Nutze sie, statt zu sagen, dass du etwas nicht kannst. Erfinde nie Wetter- oder Nachrichtendaten. Fasse Werkzeug-Ergebnisse kurz und natürlich zusammen.
-Aktuelles Datum und Uhrzeit: ${now}.`;
+Du hast Werkzeuge: Wetter, Nachrichten, Webseiten, YouTube, Mac-Apps, Timer, Lautstärke, Musik (Spotify) und ein Gedächtnis. Nutze sie, statt zu sagen, dass du etwas nicht kannst. Erfinde nie Wetter- oder Nachrichtendaten. Fasse Werkzeug-Ergebnisse kurz und natürlich zusammen.
+Wenn der Nutzer dir etwas Persönliches erzählt oder „merk dir“ sagt, speichere es mit „merken“.
+Aktuelles Datum und Uhrzeit: ${now}.${memoryText()}`;
+}
+
+function memoryText() {
+  const facts = loadMemory();
+  return facts.length ? `\nDas weißt du über ${USER_NAME}:\n- ${facts.join("\n- ")}` : "";
 }
 
 // Nachrichten säubern: nur user/assistant mit Text, maximal die letzten 40

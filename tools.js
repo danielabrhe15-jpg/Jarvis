@@ -1,7 +1,9 @@
 // Werkzeuge, die Jarvis (Gemini) selbst aufrufen kann: Wetter, Nachrichten, Webseiten und Apps öffnen.
 // Alle Dienste sind kostenlos und brauchen keinen eigenen Schlüssel.
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const TIMEOUT = 8000;
 const getJson = async (url) => {
@@ -119,7 +121,63 @@ async function timer_stellen({ sekunden = 0, bezeichnung = "" }, emit) {
   return { gestellt: true, sekunden: s };
 }
 
-export const toolHandlers = { wetter, nachrichten, webseite_oeffnen, youtube_abspielen, app_oeffnen, timer_stellen };
+// ---------- Gedächtnis: Fakten über den Nutzer, bleiben auch nach einem Neustart ----------
+const MEMORY_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "memory.json");
+export function loadMemory() {
+  try { return JSON.parse(readFileSync(MEMORY_FILE, "utf8")).filter((f) => typeof f === "string"); } catch { return []; }
+}
+const saveMemory = (facts) => writeFileSync(MEMORY_FILE, JSON.stringify(facts.slice(-50), null, 2));
+
+async function merken({ fakt = "" }) {
+  const f = String(fakt).trim().slice(0, 200);
+  if (!f) return { fehler: "Nichts zum Merken." };
+  const facts = loadMemory().filter((x) => x.toLowerCase() !== f.toLowerCase());
+  saveMemory([...facts, f]);
+  return { gemerkt: f };
+}
+
+async function vergessen({ fakt = "" }) {
+  const q = String(fakt).trim().toLowerCase();
+  const facts = loadMemory();
+  const rest = q && q !== "alles" ? facts.filter((x) => !x.toLowerCase().includes(q)) : [];
+  saveMemory(rest);
+  return { geloescht: facts.length - rest.length };
+}
+
+// ---------- Mac steuern: nur feste AppleScript-Befehle, keine freien Skripte ----------
+const osa = (script) => run("osascript", ["-e", script]);
+
+async function lautstaerke({ aktion = "", prozent }) {
+  if (process.platform !== "darwin") return { fehler: "Geht nur auf dem Mac." };
+  if (aktion === "stumm") { await osa("set volume with output muted"); return { stumm: true }; }
+  if (aktion === "ton_an") { await osa("set volume without output muted"); return { stumm: false }; }
+  const current = await new Promise((resolve) =>
+    execFile("osascript", ["-e", "output volume of (get volume settings)"], { timeout: TIMEOUT }, (e, out) => resolve(Number(out) || 50)));
+  let v = Number.isFinite(Number(prozent)) && prozent !== undefined ? Number(prozent)
+    : aktion === "lauter" ? current + 15 : aktion === "leiser" ? current - 15 : current;
+  v = Math.max(0, Math.min(100, Math.round(v)));
+  await osa(`set volume without output muted output volume ${v}`);
+  return { lautstaerke_prozent: v };
+}
+
+const MUSIC_CMDS = { abspielen: "play", pause: "pause", weiter: "next track", zurueck: "previous track", umschalten: "playpause" };
+async function musik({ aktion = "abspielen", suche = "", app = "" }) {
+  if (process.platform !== "darwin") return { fehler: "Geht nur auf dem Mac." };
+  const player = /musik|music|apple/i.test(app) || !existsSync("/Applications/Spotify.app") ? "Music" : "Spotify";
+  if (aktion === "suchen" && suche) {
+    if (player !== "Spotify") return { fehler: "Suchen geht nur mit Spotify." };
+    await run("open", [`spotify:search:${encodeURIComponent(suche)}`]);
+    return { geoeffnet: `Spotify-Suche nach ${suche}`, hinweis: "Der Nutzer wählt das Lied in Spotify selbst aus." };
+  }
+  const cmd = MUSIC_CMDS[aktion];
+  if (!cmd) return { fehler: `Unbekannte Aktion ${aktion}` };
+  await osa(`tell application "${player}" to ${cmd}`);
+  return { ok: true, player, aktion };
+}
+
+export const toolHandlers = {
+  wetter, nachrichten, webseite_oeffnen, youtube_abspielen, app_oeffnen, timer_stellen, merken, vergessen, lautstaerke, musik,
+};
 
 export const toolDeclarations = [
   {
@@ -161,6 +219,41 @@ export const toolDeclarations = [
         bezeichnung: { type: "string", description: "Wofür der Timer ist, z. B. Nudeln" },
       },
       required: ["sekunden"],
+    },
+  },
+  {
+    name: "merken",
+    description: "Speichert dauerhaft eine Information über den Nutzer, z. B. seinen Namen, Geburtstag, Vorlieben oder Termine. Nutze es, wenn er sagt „merk dir …“ oder etwas Wichtiges über sich erzählt.",
+    parameters: { type: "object", properties: { fakt: { type: "string", description: "Kurzer Satz, z. B. „Der Nutzer heißt Dano“" } }, required: ["fakt"] },
+  },
+  {
+    name: "vergessen",
+    description: "Löscht gespeicherte Informationen. fakt = Stichwort, oder „alles“.",
+    parameters: { type: "object", properties: { fakt: { type: "string" } }, required: ["fakt"] },
+  },
+  {
+    name: "lautstaerke",
+    description: "Ändert die Lautstärke des Macs.",
+    parameters: {
+      type: "object",
+      properties: {
+        aktion: { type: "string", enum: ["lauter", "leiser", "stumm", "ton_an", "setzen"] },
+        prozent: { type: "integer", description: "Nur bei setzen: 0 bis 100" },
+      },
+      required: ["aktion"],
+    },
+  },
+  {
+    name: "musik",
+    description: "Steuert Spotify (oder Apple Musik): abspielen, pause, nächstes oder vorheriges Lied, oder in Spotify nach einem Lied/Künstler suchen.",
+    parameters: {
+      type: "object",
+      properties: {
+        aktion: { type: "string", enum: ["abspielen", "pause", "weiter", "zurueck", "umschalten", "suchen"] },
+        suche: { type: "string", description: "Nur bei suchen: Lied oder Künstler" },
+        app: { type: "string", description: "Optional: Spotify oder Musik" },
+      },
+      required: ["aktion"],
     },
   },
 ];
