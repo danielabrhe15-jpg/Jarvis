@@ -7,7 +7,7 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 - 🗣️ **„Jarvis“**: hört automatisch zu, ohne Klick. Sag einfach „Jarvis, wie spät ist es?“ oder „Wie spät ist es, Jarvis?“
 - ⚡ **Live-Streaming** der Antworten
 - 💾 Gesprächsverlauf bleibt im Browser gespeichert
-- 🌌 Arc-Reactor-Oberfläche im Jarvis-Look
+- 🌌 HUD-Oberfläche im Iron-Man-Stil: Reaktor, der mit der Stimme pulsiert, Uhr und Datum
 
 ## Schritt für Schritt (kostenlos)
 
@@ -47,7 +47,7 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 | „Spiel Musik“ / „Nächstes Lied“ | Steuert Spotify oder Apple Musik |
 | „Stopp“ / „Ruhe“ (während er spricht) | Jarvis ist sofort still |
 
-Jarvis reagiert nur, wenn du seinen Namen sagst, damit er nicht in Gespräche hineinredet. Wetter und Nachrichten brauchen keinen eigenen Key. Werkzeuge gibt es derzeit mit Gemini.
+Jarvis reagiert nur, wenn du seinen Namen sagst, damit er nicht in Gespräche hineinredet. Sagst du nur „Jarvis“ und machst eine Pause, antwortet er „Ja, Chef?“ und wartet auf deine Frage. Antworten werden nur vorgelesen. Willst du sie lesen, sag „zeig mir …“ oder „schreib mir …“. Wetter und Nachrichten brauchen keinen eigenen Key. Werkzeuge gibt es derzeit mit Gemini.
 
 ## Natürlichere Stimme mit Fish Audio (optional)
 
@@ -59,11 +59,13 @@ Mit Fish Audio gibt es unten auf der Seite ein Stimmen-Menü (deutsche Jarvis-St
 
 | Aktion | So geht's |
 |---|---|
-| Sprechen | Auf den leuchtenden Reaktor klicken oder **Leertaste** drücken |
-| Schreiben | Text unten eingeben und **Senden** |
+| Sprechen | „Jarvis“ sagen, auf den Reaktor klicken oder **Leertaste** drücken |
+| Unterbrechen | Während er spricht auf den Reaktor klicken oder „Stopp“ sagen |
+| Schreiben | Unten rechts auf **⌨** klicken, Text eingeben und **Senden** |
 | Jarvis rufen | Einfach „Jarvis, …“ sagen, Jarvis hört automatisch zu, sobald die Seite offen ist (abschaltbar unten per Haken) |
 | Vorlesen stoppen | **Esc** |
-| Stimme und Tempo | Menüs unten (mit Fish Audio die Fish-Stimmen, sonst die deutschen Stimmen deines Systems) |
+| Einstellungen | Unten rechts auf **⚙**: Sprachausgabe, Zuhören, Stimme, Tempo, Verlauf löschen |
+| Stimme und Tempo | Menüs im ⚙-Panel (mit Fish Audio die Fish-Stimmen, sonst die deutschen Stimmen deines Systems) |
 
 ## Einstellungen (`.env`)
 
@@ -77,7 +79,7 @@ Mit Fish Audio gibt es unten auf der Seite ein Stimmen-Menü (deutsche Jarvis-St
 | `ANTHROPIC_API_KEY` | (leer) | Claude-Key |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Claude-Modell, z. B. `claude-sonnet-5-5` |
 | `PORT` | `3000` | Port des Servers |
-| `USER_NAME` | `Sir` | Wie Jarvis dich anspricht |
+| `USER_NAME` | `Chef` | Wie Jarvis dich anspricht |
 | `GEMINI_FALLBACKS` | `gemini-3.1-flash-lite,…` | Ausweich-Modelle, wenn das Gratis-Limit eines Modells voll ist |
 | `FISH_SPEED` | `1.1` | Sprechtempo der Fish-Stimme |
 

@@ -8,32 +8,56 @@
 </head>
 <body>
   <div class="grid-bg"></div>
+  <div class="vignette"></div>
+
   <header>
-    <h1>J.A.R.V.I.S.</h1>
-    <span id="status" class="status">Bereit</span>
+    <div class="hud-left">
+      <h1>J.A.R.V.I.S.</h1>
+      <span class="sub">Just A Rather Very Intelligent System</span>
+    </div>
+    <div class="hud-right">
+      <div id="clock" class="clock">--:--</div>
+      <div id="date" class="date"></div>
+    </div>
   </header>
 
   <main>
-    <button id="reactor" class="reactor" title="Klicken zum Sprechen" aria-label="Sprechen">
-      <span class="ring r1"></span>
-      <span class="ring r2"></span>
-      <span class="ring r3"></span>
-      <span class="core"></span>
-    </button>
+    <div class="stage">
+      <svg class="hud-arcs" viewBox="0 0 400 400" aria-hidden="true">
+        <circle cx="200" cy="200" r="190" class="arc a1" />
+        <circle cx="200" cy="200" r="172" class="arc a2" />
+        <circle cx="200" cy="200" r="156" class="arc a3" />
+      </svg>
+      <button id="reactor" class="reactor" title="Klicken zum Sprechen oder Stoppen" aria-label="Sprechen">
+        <span class="ring r1"></span>
+        <span class="ring r2"></span>
+        <span class="ring r3"></span>
+        <span class="core"></span>
+      </button>
+    </div>
+
+    <div id="status" class="status">Bereit</div>
+    <div id="heard" class="heard" aria-live="polite"></div>
     <p id="hint" class="hint">Sag „Jarvis“ und dann deine Frage.</p>
 
+    <!-- Antworten erscheinen hier nur, wenn Text ausdrücklich gewünscht ist oder die Sprachausgabe aus ist -->
     <section id="log" class="log" aria-live="polite"></section>
   </main>
 
   <footer>
-    <form id="form" autocomplete="off">
+    <form id="form" class="hidden" autocomplete="off">
       <input id="input" type="text" placeholder="Nachricht an Jarvis…" />
       <button type="submit" id="sendBtn">Senden</button>
     </form>
-    <div class="controls">
-      <label><input type="checkbox" id="ttsToggle" checked /> Sprachausgabe</label>
-      <label><input type="checkbox" id="wakeToggle" checked /> Auf „Jarvis“ hören</label>
-      <select id="voiceSelect" title="Stimme"></select>
+    <div class="dock">
+      <button id="kbdBtn" class="icon" type="button" title="Tippen statt sprechen" aria-label="Tastatur">⌨</button>
+      <button id="settingsBtn" class="icon" type="button" title="Einstellungen" aria-label="Einstellungen">⚙</button>
+    </div>
+    <div id="settings" class="panel hidden">
+      <h2>Einstellungen</h2>
+      <label class="row"><span>Sprachausgabe</span><input type="checkbox" id="ttsToggle" checked /></label>
+      <label class="row"><span>Auf „Jarvis“ hören</span><input type="checkbox" id="wakeToggle" checked /></label>
+      <label class="row stack"><span>Stimme und Tempo</span><select id="voiceSelect" title="Stimme"></select></label>
       <button id="clearBtn" type="button">Verlauf löschen</button>
     </div>
   </footer>

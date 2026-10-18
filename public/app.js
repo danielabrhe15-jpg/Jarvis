@@ -2,7 +2,8 @@
 const $ = (id) => document.getElementById(id);
 const log = $("log"), form = $("form"), input = $("input"), reactor = $("reactor");
 const statusEl = $("status"), ttsToggle = $("ttsToggle"), wakeToggle = $("wakeToggle");
-const voiceSelect = $("voiceSelect"), hint = $("hint");
+const voiceSelect = $("voiceSelect"), hint = $("hint"), heardEl = $("heard");
+const NAME = "Chef"; // so spricht Jarvis den Nutzer in festen Sätzen an
 
 const LANG = "de-DE";
 const STORAGE_KEY = "jarvis-history";
@@ -24,7 +25,41 @@ function addMsg(role, text) {
   log.scrollTop = log.scrollHeight;
   return el;
 }
-history.forEach((m) => addMsg(m.role, m.content));
+
+// ---------- Oberfläche: Uhr, Einstellungen, Tastatur ----------
+function tick() {
+  const now = new Date();
+  $("clock").textContent = now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  $("date").textContent = now.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+}
+tick(); setInterval(tick, 10000);
+$("settingsBtn").onclick = (e) => {
+  e.stopPropagation();
+  $("settings").classList.toggle("hidden");
+  $("settingsBtn").classList.toggle("on", !$("settings").classList.contains("hidden"));
+};
+document.addEventListener("click", (e) => {
+  if (!$("settings").contains(e.target) && e.target !== $("settingsBtn")) {
+    $("settings").classList.add("hidden"); $("settingsBtn").classList.remove("on");
+  }
+});
+$("kbdBtn").onclick = () => {
+  const hidden = form.classList.toggle("hidden");
+  $("kbdBtn").classList.toggle("on", !hidden);
+  if (!hidden) input.focus();
+};
+
+// Zeigt kurz an, was gefragt wurde (statt eines Chatverlaufs)
+let heardHide = null;
+function showQuestion(text) {
+  heardEl.textContent = `„${text}“`;
+  heardEl.classList.add("show");
+  clearTimeout(heardHide);
+  heardHide = setTimeout(() => heardEl.classList.remove("show"), 6000);
+}
+
+// Antworttext nur anzeigen, wenn ausdrücklich gewünscht (oder ohne Sprachausgabe)
+const TEXT_WANTED = /\b(zeig|zeige|zeigen|anzeigen|schreib|schreibe|aufschreiben|notier|als text|text davon|auf dem bildschirm|liste)\b/i;
 
 function setState(state, label) {
   reactor.classList.remove("listening", "thinking", "speaking");
@@ -37,6 +72,7 @@ function setState(state, label) {
 const synth = window.speechSynthesis;
 let voices = [];
 let speakQueue = 0;
+let audioCtx = null;
 let fishOn = false;
 
 function loadVoices() {
@@ -71,7 +107,7 @@ if (synth) {
 }
 voiceSelect.onchange = () => {
   localStorage.setItem(fishOn ? "jarvis-fish-voice" : "jarvis-voice", voiceSelect.value);
-  stopSpeaking(); speak("Guten Tag, Sir. So klinge ich jetzt.");
+  stopSpeaking(); speak(`Guten Tag, ${NAME}. So klinge ich jetzt.`);
 };
 
 // Fish Audio: wird genutzt, wenn der Server einen FISH_API_KEY hat. Dann gibt es eine
@@ -84,7 +120,8 @@ speedSelect.value = localStorage.getItem("jarvis-speed") || "1.1";
 speedSelect.style.display = "none";
 speedSelect.onchange = () => {
   localStorage.setItem("jarvis-speed", speedSelect.value);
-  stopSpeaking(); speak("So schnell spreche ich jetzt, Sir.");
+  stopSpeaking(); speak(`So schnell spreche ich jetzt, ${NAME}.`);
+  preloadAck();
 };
 voiceSelect.after(speedSelect);
 
@@ -100,7 +137,18 @@ fetch("/api/health").then((r) => r.json()).then(async (j) => {
   list.forEach((v) => voiceSelect.add(new Option(v.id === def ? `${v.name} (Standard)` : v.name, v.id)));
   voiceSelect.value = localStorage.getItem("jarvis-fish-voice") || def || list[0].id;
   voiceSelect.style.display = "";
+  preloadAck();
 }).catch(() => {});
+// „Ja, Chef?“ vorab laden, damit es ohne Verzögerung kommt
+const ACK = `Ja, ${NAME}?`;
+const ttsCache = new Map();
+function preloadAck() {
+  if (!fishOn) return;
+  const url = ttsUrl(ACK);
+  if (ttsCache.has(url)) return;
+  fetch(url).then((r) => (r.ok ? r.blob() : null)).then((b) => b && ttsCache.set(url, URL.createObjectURL(b))).catch(() => {});
+}
+voiceSelect.addEventListener("change", preloadAck);
 const ttsUrl = (text) =>
   `/api/tts?text=${encodeURIComponent(text)}&speed=${speedSelect.value}` + (voiceSelect.value ? `&voice=${voiceSelect.value}` : "");
 
@@ -122,10 +170,31 @@ function speakBrowser(text) {
 }
 
 // Spielt eine Audio-Datei ab, sobald genug geladen ist (wartet nicht aufs komplette Laden)
+// Der Reaktor pulsiert mit der Lautstärke der Stimme. Nur wenn der Audio-Kontext läuft,
+// sonst bliebe die Stimme stumm (Chrome startet ihn erst nach einem Klick).
+let analyser = null, levelLoop = 0;
+function visualize(a) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state !== "running") { audioCtx.resume().catch(() => {}); return; }
+    if (!analyser) { analyser = audioCtx.createAnalyser(); analyser.fftSize = 256; analyser.connect(audioCtx.destination); }
+    audioCtx.createMediaElementSource(a).connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    cancelAnimationFrame(levelLoop);
+    const step = () => {
+      analyser.getByteFrequencyData(data);
+      const level = Math.min(1, data.reduce((x, y) => x + y, 0) / data.length / 90);
+      document.documentElement.style.setProperty("--level", a.paused ? 0 : level.toFixed(3));
+      if (!a.paused && !a.ended) levelLoop = requestAnimationFrame(step);
+    };
+    a.addEventListener("playing", () => { levelLoop = requestAnimationFrame(step); }, { once: true });
+  } catch {}
+}
 function playAudio(a) {
   return new Promise((resolve, reject) => {
     currentAudio = a;
-    a.onended = () => resolve();
+    visualize(a);
+    a.onended = () => { document.documentElement.style.setProperty("--level", 0); resolve(); };
     a.onerror = () => reject(new Error("Audio-Fehler"));
     a.play().catch(reject);
   });
@@ -139,7 +208,8 @@ function speak(text) {
   // Fish-Audio sofort anfordern, damit der Satz bereitliegt, wenn er dran ist
   let audio = null;
   if (fishOn) {
-    audio = new Audio(ttsUrl(text));
+    const url = ttsUrl(text);
+    audio = new Audio(ttsCache.get(url) || url);
     audio.preload = "auto";
   }
   audioChain = audioChain.then(async () => {
@@ -154,8 +224,7 @@ function speak(text) {
   });
 }
 
-// Kurzer Ton als Zeichen, dass Jarvis zuhört (schneller als „Ja, Sir?“ vorzulesen)
-let audioCtx = null;
+// Kurzer Ton (z. B. nach „Stopp“ und beim Timer)
 function beep() {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -194,12 +263,14 @@ async function ask(text) {
   if (!text || busy) return;
   stopSpeaking();
   busy = true;
-  addMsg("user", text);
+  showQuestion(text);
   history.push({ role: "user", content: text });
   save();
   setState("thinking", "Denkt nach");
 
-  const el = addMsg("assistant", "");
+  const showText = !ttsToggle.checked || TEXT_WANTED.test(text);
+  log.innerHTML = "";
+  const el = showText ? addMsg("assistant", "") : null;
   let full = "", pending = "", spokeFirst = false;
 
   try {
@@ -227,8 +298,7 @@ async function ask(text) {
         const data = JSON.parse(ev.match(/^data: (.*)$/m)?.[1] || "{}");
         if (type === "delta") {
           full += data.text; pending += data.text;
-          el.textContent = full;
-          log.scrollTop = log.scrollHeight;
+          if (el) { el.textContent = full; log.scrollTop = log.scrollHeight; }
           // Den ersten Satz sofort vorlesen, danach in größeren Stücken (klingt flüssiger)
           // Den Anfang so früh wie möglich vorlesen (auch an einem Komma), danach in größeren Stücken
           const m = pending.match(/^([\s\S]*[.!?…])(\s+)([\s\S]*)$/) ||
@@ -246,7 +316,7 @@ async function ask(text) {
     history.push({ role: "assistant", content: full });
     save();
   } catch (err) {
-    el.remove();
+    el?.remove();
     history.pop(); save();
     addMsg("error", `Fehler: ${err.message}`);
     setState("error", "Fehler");
@@ -276,7 +346,7 @@ function dbg(event, detail = "") {
 
 // ---------- Spracheingabe ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, listening = false, wantListening = false, awaitingCommand = false, awaitTimer = null;
+let rec = null, listening = false, wantListening = false, awaitingCommand = false, awaitTimer = null, ackTimer = null;
 const HINT_WAKE = "Sag „Jarvis“ und dann deine Frage, z. B. „Jarvis, wie spät ist es?“";
 const HINT_CLICK = "Klicke auf den Reaktor oder drücke die Leertaste, um zu sprechen.";
 try { if (localStorage.getItem("jarvis-wake") === "off") wakeToggle.checked = false; } catch {}
@@ -329,6 +399,8 @@ if (!SR) {
     }
     // Nachhall der eigenen Stimme kurz nach dem Sprechen ignorieren
     if (finalText && isEcho(finalText)) return;
+    // Redet der Nutzer nach „Jarvis“ weiter, keine Bestätigung
+    if (interim || finalText) clearTimeout(ackTimer);
     if (interim) input.placeholder = interim;
     if (!finalText) return;
     input.placeholder = "Nachricht an Jarvis…";
@@ -340,10 +412,11 @@ if (!SR) {
       if (cmd === null) return;
       if (cmd) ask(cmd);
       else {
-        // Nur „Jarvis“ gesagt: kurz bestätigen und auf die Frage warten
+        // Nur „Jarvis“ gesagt: auf die Frage warten. Kommt kurz nichts, „Ja, Chef?“ sagen
         openFollowUp(10000);
-        beep();
         setState("listening", "Hört zu");
+        clearTimeout(ackTimer);
+        ackTimer = setTimeout(() => { if (awaitingCommand && !busy) speak(ACK); }, 900);
       }
     } else {
       awaitingCommand = false;
@@ -401,8 +474,8 @@ function startTimer(sekunden, bezeichnung) {
   const name = bezeichnung ? `für ${bezeichnung} ` : "";
   setTimeout(() => {
     [0, 400, 800].forEach((ms) => setTimeout(beep, ms));
-    const text = `Sir, Ihr Timer ${name}ist abgelaufen.`;
-    addMsg("assistant", text);
+    const text = `${NAME}, Ihr Timer ${name}ist abgelaufen.`;
+    showQuestion(text);
     setTimeout(() => speak(text), 1200);
   }, sekunden * 1000);
 }
