@@ -16,7 +16,7 @@ const PROVIDER = (
 ).toLowerCase();
 
 const MODELS = {
-  gemini: process.env.GEMINI_MODEL || "gemini-flash-latest",
+  gemini: process.env.GEMINI_MODEL || "gemini-flash-lite-latest",
   claude: process.env.CLAUDE_MODEL || "claude-opus-5-5",
   ollama: process.env.OLLAMA_MODEL || "llama3.2",
 };
@@ -117,7 +117,7 @@ async function* streamGemini(messages, signal) {
   // Manche Modelle erlauben das Abschalten nicht, dann ohne erneut versuchen
   if (res.status === 400) {
     const text = await res.clone().text();
-    if (/thinking/i.test(text)) res = await request(false);
+    if (!/api key/i.test(text)) res = await request(false);
   }
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));

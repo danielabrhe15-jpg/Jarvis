@@ -48,7 +48,7 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 |---|---|---|
 | `PROVIDER` | automatisch | `gemini`, `ollama` oder `claude` |
 | `GEMINI_API_KEY` | (leer) | Kostenloser Google-Key |
-| `GEMINI_MODEL` | `gemini-flash-latest` | Gemini-Modell |
+| `GEMINI_MODEL` | `gemini-flash-lite-latest` | Gemini-Modell (`gemini-flash-latest` ist etwas klüger, aber langsamer) |
 | `OLLAMA_MODEL` | `llama3.2` | Lokales Modell für Ollama |
 | `OLLAMA_URL` | `http://localhost:11434` | Adresse von Ollama |
 | `ANTHROPIC_API_KEY` | (leer) | Claude-Key |
