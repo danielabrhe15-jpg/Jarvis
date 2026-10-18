@@ -54,7 +54,10 @@ function loadVoices() {
   });
   // Bevorzugt eine männliche/„Google“-Stimme, falls nichts gespeichert ist
   if (!saved) {
-    const pref = list.find((v) => /male|männ|google|stefan|markus|conrad|daniel/i.test(v.name));
+    const pref =
+      list.find((v) => /premium|enhanced|erweitert|natural/i.test(v.name)) ||
+      list.find((v) => /markus|yannick|anna|petra|helena|martin|katja|conrad/i.test(v.name)) ||
+      list.find((v) => /google/i.test(v.name));
     if (pref) voiceSelect.value = pref.name;
   }
 }
@@ -71,8 +74,8 @@ function speak(text) {
   if (!synth || !ttsToggle.checked || !text.trim()) return;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = LANG;
-  u.rate = 1.02;
-  u.pitch = 0.9;
+  u.rate = 1.05;
+  u.pitch = 1;
   const v = voices.find((x) => x.name === voiceSelect.value);
   if (v) u.voice = v;
   speakQueue++;
@@ -98,7 +101,7 @@ async function ask(text) {
   setState("thinking", "Denkt nach");
 
   const el = addMsg("assistant", "");
-  let full = "", pending = "";
+  let full = "", pending = "", spokeFirst = false;
 
   try {
     const res = await fetch("/api/chat", {
@@ -127,9 +130,9 @@ async function ask(text) {
           full += data.text; pending += data.text;
           el.textContent = full;
           log.scrollTop = log.scrollHeight;
-          // Ganze Sätze sofort vorlesen, während der Rest noch kommt
-          const m = pending.match(/^([\s\S]*[.!?…:])(\s+)([\s\S]*)$/);
-          if (m) { speak(m[1]); pending = m[3]; }
+          // Den ersten Satz sofort vorlesen, danach in größeren Stücken (klingt flüssiger)
+          const m = pending.match(/^([\s\S]*[.!?…])(\s+)([\s\S]*)$/);
+          if (m && (!spokeFirst || m[1].length > 160)) { speak(m[1]); pending = m[3]; spokeFirst = true; }
         } else if (type === "error") {
           throw new Error(data.message);
         }

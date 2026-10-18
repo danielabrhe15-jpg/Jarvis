@@ -101,16 +101,24 @@ async function* streamClaude(messages, signal) {
 
 async function* streamGemini(messages, signal) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:streamGenerateContent?alt=sse`;
-  const res = await fetch(url, {
-    method: "POST",
-    signal,
-    headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt() }] },
-      contents: messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
-      generationConfig: { maxOutputTokens: 2048 },
-    }),
-  });
+  const request = (fast) =>
+    fetch(url, {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt() }] },
+        contents: messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+        // "Nachdenken" aus: Jarvis antwortet dadurch deutlich schneller
+        generationConfig: { maxOutputTokens: 2048, ...(fast && { thinkingConfig: { thinkingBudget: 0 } }) },
+      }),
+    });
+  let res = await request(true);
+  // Manche Modelle erlauben das Abschalten nicht, dann ohne erneut versuchen
+  if (res.status === 400) {
+    const text = await res.clone().text();
+    if (/thinking/i.test(text)) res = await request(false);
+  }
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
     const msg = j?.error?.message || `HTTP ${res.status}`;
