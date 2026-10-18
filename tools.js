@@ -6,8 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const TIMEOUT = 8000;
-const getJson = async (url) => {
-  const r = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT), headers: { "User-Agent": "Jarvis/1.0" } });
+const getJson = async (url, timeout = TIMEOUT) => {
+  const r = await fetch(url, { signal: AbortSignal.timeout(timeout), headers: { "User-Agent": "Jarvis/1.0 (persoenlicher Assistent)" } });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 };
@@ -21,9 +21,27 @@ const WEATHER_CODES = {
   96: "Gewitter mit Hagel", 99: "schweres Gewitter mit Hagel",
 };
 
+// Ort → Koordinaten: erst Open-Meteo, bei Ausfall OpenStreetMap; Ergebnisse werden gemerkt
+const geoCache = new Map();
+async function geocode(ort) {
+  const key = ort.trim().toLowerCase();
+  if (geoCache.has(key)) return geoCache.get(key);
+  let p = null;
+  try {
+    const g = await getJson(`https://geocoding-api.open-meteo.com/v1/search?count=1&language=de&name=${encodeURIComponent(ort)}`, 4000);
+    const r = g.results?.[0];
+    if (r) p = { name: r.name, country: r.country, latitude: r.latitude, longitude: r.longitude };
+  } catch {}
+  if (!p) {
+    const n = (await getJson(`https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=de&q=${encodeURIComponent(ort)}`, 6000))[0];
+    if (n) p = { name: n.name || ort, country: n.display_name.split(",").pop().trim(), latitude: Number(n.lat), longitude: Number(n.lon) };
+  }
+  if (p) geoCache.set(key, p);
+  return p;
+}
+
 async function wetter({ ort = process.env.CITY || "Berlin" }) {
-  const geo = await getJson(`https://geocoding-api.open-meteo.com/v1/search?count=1&language=de&name=${encodeURIComponent(ort)}`);
-  const p = geo.results?.[0];
+  const p = await geocode(ort);
   if (!p) return { fehler: `Ort "${ort}" nicht gefunden.` };
   const w = await getJson(
     `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}&timezone=auto&forecast_days=3` +
@@ -175,7 +193,44 @@ async function musik({ aktion = "abspielen", suche = "", app = "" }) {
   return { ok: true, player, aktion };
 }
 
+// ---------- Präsentation: Folien werden im Browser im Vollbild gezeigt ----------
+async function praesentation_erstellen({ titel = "", folien = [] }, emit) {
+  const slides = (Array.isArray(folien) ? folien : []).slice(0, 10).map((f) => ({
+    titel: String(f?.titel || "").slice(0, 120),
+    punkte: (Array.isArray(f?.punkte) ? f.punkte : []).slice(0, 6).map((p) => String(p).slice(0, 200)),
+    bildsuche: String(f?.bildsuche || "").slice(0, 80),
+  })).filter((f) => f.titel || f.punkte.length);
+  if (!slides.length) return { fehler: "Keine Folien angegeben." };
+  emit?.("slides", { titel: String(titel).slice(0, 120), folien: slides });
+  return { angezeigt: true, folien: slides.length };
+}
+
+// Bild zu einem Suchbegriff über Wikipedia (kostenlos, ohne Schlüssel)
+const imageCache = new Map();
+export async function findImage(q) {
+  const key = String(q || "").trim().toLowerCase().slice(0, 80);
+  if (!key) return null;
+  if (imageCache.has(key)) return imageCache.get(key);
+  let url = null;
+  for (const lang of ["de", "en"]) {
+    try {
+      const j = await getJson(
+        `https://${lang}.wikipedia.org/w/api.php?action=query&format=json&generator=search&gsrlimit=6` +
+          `&prop=pageimages&piprop=thumbnail&pithumbsize=1000&gsrsearch=${encodeURIComponent(key)}`,
+      );
+      const pages = Object.values(j.query?.pages || {}).sort((a, b) => a.index - b.index);
+      url = pages.find((p) => p.thumbnail?.source)?.thumbnail.source || null;
+    } catch {}
+    if (url) break;
+  }
+  imageCache.set(key, url);
+  return url;
+}
+
+export { wetter, nachrichten };
+
 export const toolHandlers = {
+  praesentation_erstellen,
   wetter, nachrichten, webseite_oeffnen, youtube_abspielen, app_oeffnen, timer_stellen, merken, vergessen, lautstaerke, musik,
 };
 
@@ -219,6 +274,30 @@ export const toolDeclarations = [
         bezeichnung: { type: "string", description: "Wofür der Timer ist, z. B. Nudeln" },
       },
       required: ["sekunden"],
+    },
+  },
+  {
+    name: "praesentation_erstellen",
+    description: "Zeigt dem Nutzer eine bildliche Präsentation (Folien im Vollbild mit Bildern und Stichpunkten). Nutze das, wenn er eine Präsentation, Folien, eine Übersicht oder etwas bildlich erklärt haben möchte.",
+    parameters: {
+      type: "object",
+      properties: {
+        titel: { type: "string", description: "Titel der Präsentation" },
+        folien: {
+          type: "array",
+          description: "4 bis 7 Folien",
+          items: {
+            type: "object",
+            properties: {
+              titel: { type: "string" },
+              punkte: { type: "array", items: { type: "string" }, description: "2 bis 4 kurze Stichpunkte" },
+              bildsuche: { type: "string", description: "Wikipedia-Suchbegriff für ein passendes Bild, z. B. „Mars Planet“" },
+            },
+            required: ["titel", "punkte"],
+          },
+        },
+      },
+      required: ["titel", "folien"],
     },
   },
   {

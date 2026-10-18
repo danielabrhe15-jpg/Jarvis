@@ -1,7 +1,8 @@
 import "dotenv/config";
 import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
-import { toolDeclarations, runTool, loadMemory } from "./tools.js";
+import { toolDeclarations, runTool, loadMemory, findImage, wetter, nachrichten } from "./tools.js";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,6 +57,7 @@ Verwende keine Markdown-Formatierung, keine Aufzählungszeichen, keine Emojis un
 Antworte in der Sprache, in der du angesprochen wirst (standardmäßig Deutsch).
 Du hast Werkzeuge: Wetter, Nachrichten, Webseiten, YouTube, Mac-Apps, Timer, Lautstärke, Musik (Spotify) und ein Gedächtnis. Nutze sie, statt zu sagen, dass du etwas nicht kannst. Erfinde nie Wetter- oder Nachrichtendaten. Fasse Werkzeug-Ergebnisse kurz und natürlich zusammen.
 Wenn der Nutzer dir etwas Persönliches erzählt oder „merk dir“ sagt, speichere es mit „merken“.
+Wenn der Nutzer eine Präsentation, Folien oder etwas bildlich erklärt haben möchte, nutze „praesentation_erstellen“ mit 4 bis 7 Folien, je 2 bis 4 kurzen Stichpunkten und einem Bild-Suchbegriff. Sag danach nur einen kurzen Satz, z. B. „Hier ist Ihre Präsentation, ${USER_NAME}.“
 Aktuelles Datum und Uhrzeit: ${now}.${memoryText()}`;
 }
 
@@ -126,7 +128,7 @@ async function* streamGemini(messages, signal, emit) {
         contents,
         tools: [{ functionDeclarations: toolDeclarations }],
         // "Nachdenken" aus: Jarvis antwortet dadurch deutlich schneller
-        generationConfig: { maxOutputTokens: 400, ...(fast && { thinkingConfig: { thinkingBudget: 0 } }) },
+        generationConfig: { maxOutputTokens: 1500, ...(fast && { thinkingConfig: { thinkingBudget: 0 } }) },
       }),
     });
 
@@ -208,6 +210,35 @@ const providers = { claude: streamClaude, gemini: streamGemini, ollama: streamOl
 const FISH = process.env.FISH_API_KEY
   ? { model: process.env.FISH_MODEL || "s2.1-pro-free", voice: process.env.FISH_VOICE_ID || null, speed: Number(process.env.FISH_SPEED) || 1.1 }
   : null;
+
+// ---------- Daten für die Oberfläche (HUD) ----------
+const sh = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 4000 }, (e, out) => resolve(e ? "" : String(out))));
+const cached = (ms, fn) => { let at = 0, val; return async () => (Date.now() - at < ms && val !== undefined ? val : ((val = await fn().catch(() => null)), (at = Date.now()), val)); };
+const hudWeather = cached(10 * 60_000, async () => {
+  const w = await wetter({});
+  return w.fehler ? null : { ort: w.ort.split(",")[0], temp: Math.round(w.jetzt.temperatur_c), text: w.jetzt.wetter, max: Math.round(w.vorhersage[0].max_c), min: Math.round(w.vorhersage[0].min_c) };
+});
+const hudNews = cached(10 * 60_000, async () => (await nachrichten()).meldungen.map((m) => m.titel));
+
+app.get("/api/hud", async (_req, res) => {
+  const [batt, vol, weather] = await Promise.all([
+    process.platform === "darwin" ? sh("pmset", ["-g", "batt"]) : "",
+    process.platform === "darwin" ? sh("osascript", ["-e", "output volume of (get volume settings)"]) : "",
+    hudWeather(),
+  ]);
+  const b = batt.match(/(\d+)%;\s*([^;]+)/);
+  res.json({
+    akku: b ? { prozent: Number(b[1]), laedt: /charg|AC/i.test(b[2]) && !/discharging/i.test(b[2]) } : null,
+    lautstaerke: vol.trim() ? Number(vol) : null,
+    wetter: weather,
+    modell: MODEL,
+  });
+});
+app.get("/api/news", async (_req, res) => res.json({ schlagzeilen: (await hudNews()) || [] }));
+app.get("/api/image", async (req, res) => {
+  const url = await findImage(req.query.q);
+  res.json({ url });
+});
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, provider: PROVIDER, model: MODEL, tts: FISH ? "fish" : "browser" }));
 

@@ -7,7 +7,8 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 - 🗣️ **„Jarvis“**: hört automatisch zu, ohne Klick. Sag einfach „Jarvis, wie spät ist es?“ oder „Wie spät ist es, Jarvis?“
 - ⚡ **Live-Streaming** der Antworten
 - 💾 Gesprächsverlauf bleibt im Browser gespeichert
-- 🌌 HUD-Oberfläche im Iron-Man-Stil: Reaktor, der mit der Stimme pulsiert, Uhr und Datum
+- 🌌 HUD-Oberfläche im Iron-Man-Stil: Reaktor, der mit der Stimme pulsiert, Uhr, Wetter, Akku, Lautstärke, Timer-Countdown und Nachrichten-Laufband
+- 🎬 **Präsentationen**: Folien im Vollbild mit Bildern
 
 ## Schritt für Schritt (kostenlos)
 
@@ -45,6 +46,7 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 | „Merk dir, dass ich am 5. März Geburtstag habe.“ | Jarvis merkt sich das dauerhaft (in `memory.json`, nur auf deinem Rechner) |
 | „Mach lauter“ / „Lautstärke auf 30 Prozent“ | Ändert die Mac-Lautstärke |
 | „Spiel Musik“ / „Nächstes Lied“ | Steuert Spotify oder Apple Musik |
+| „Mach mir eine Präsentation über den Mars“ | Folien im Vollbild mit Bildern von Wikipedia. Blättern mit „weiter“ / „zurück“, Pfeiltasten oder Klick, beenden mit „schließen“ oder Esc |
 | „Stopp“ / „Ruhe“ (während er spricht) | Jarvis ist sofort still |
 
 Jarvis reagiert nur, wenn du seinen Namen sagst, damit er nicht in Gespräche hineinredet. Sagst du nur „Jarvis“ und machst eine Pause, antwortet er „Ja, Chef?“ und wartet auf deine Frage. Antworten werden nur vorgelesen. Willst du sie lesen, sag „zeig mir …“ oder „schreib mir …“. Wetter und Nachrichten brauchen keinen eigenen Key. Werkzeuge gibt es derzeit mit Gemini.
@@ -80,6 +82,7 @@ Mit Fish Audio gibt es unten auf der Seite ein Stimmen-Menü (deutsche Jarvis-St
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Claude-Modell, z. B. `claude-sonnet-5-5` |
 | `PORT` | `3000` | Port des Servers |
 | `USER_NAME` | `Chef` | Wie Jarvis dich anspricht |
+| `CITY` | `Berlin` | Deine Stadt für Wetter und Anzeige |
 | `GEMINI_FALLBACKS` | `gemini-3.1-flash-lite,…` | Ausweich-Modelle, wenn das Gratis-Limit eines Modells voll ist |
 | `FISH_SPEED` | `1.1` | Sprechtempo der Fish-Stimme |
 

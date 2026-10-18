@@ -304,6 +304,8 @@ async function ask(text) {
           const m = pending.match(/^([\s\S]*[.!?…])(\s+)([\s\S]*)$/) ||
             (!spokeFirst && pending.length > 60 ? pending.match(/^([\s\S]*[,;:])(\s+)([\s\S]*)$/) : null);
           if (m && (!spokeFirst || m[1].length > 160)) { speak(m[1]); pending = m[3]; spokeFirst = true; }
+        } else if (type === "slides") {
+          openSlides(data);
         } else if (type === "timer") {
           startTimer(data.sekunden, data.bezeichnung);
         } else if (type === "error") {
@@ -392,6 +394,8 @@ if (!SR) {
       const r = e.results[i];
       if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
     }
+    // Folien steuern („weiter“, „zurück“, „schließen“) geht auch, während Jarvis spricht
+    if (finalText && slideVoiceCommand(finalText)) { if (speakQueue > 0) stopSpeaking(); return; }
     // Während Jarvis spricht, nur auf „Stopp“ hören, sonst hört er sich selbst
     if (speakQueue > 0 || busy) {
       if (isStopCommand(finalText + " " + interim)) { stopSpeaking(); beep(); }
@@ -470,9 +474,13 @@ function isEcho(text) {
 }
 
 // Timer: läuft im Browser, am Ende drei Töne und eine Ansage
+const timers = [];
 function startTimer(sekunden, bezeichnung) {
   const name = bezeichnung ? `für ${bezeichnung} ` : "";
+  const t = { label: bezeichnung || "Timer", end: Date.now() + sekunden * 1000 };
+  timers.push(t); renderTimers();
   setTimeout(() => {
+    timers.splice(timers.indexOf(t), 1); renderTimers();
     [0, 400, 800].forEach((ms) => setTimeout(beep, ms));
     const text = `${NAME}, Ihr Timer ${name}ist abgelaufen.`;
     showQuestion(text);
@@ -534,3 +542,117 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") stopSpeaking();
 });
+
+// ---------- HUD: Skala um den Reaktor, Live-Daten, Timer, Nachrichten ----------
+(function drawTicks() {
+  const g = $("ticks"), ns = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 120; i++) {
+    const a = (i / 120) * Math.PI * 2, major = i % 10 === 0, r1 = major ? 140 : 145, r2 = 150;
+    const l = document.createElementNS(ns, "line");
+    l.setAttribute("x1", 200 + r1 * Math.cos(a)); l.setAttribute("y1", 200 + r1 * Math.sin(a));
+    l.setAttribute("x2", 200 + r2 * Math.cos(a)); l.setAttribute("y2", 200 + r2 * Math.sin(a));
+    if (major) l.setAttribute("class", "major");
+    g.appendChild(l);
+  }
+})();
+
+const setBar = (id, pct) => { $(id).style.width = `${Math.max(0, Math.min(100, pct))}%`; };
+function setKv(id, text, cls = "") { const el = $(id); el.textContent = text; el.className = cls; }
+
+async function refreshHud() {
+  try {
+    const h = await fetch("/api/hud").then((r) => r.json());
+    if (h.wetter) {
+      $("wxTemp").textContent = `${h.wetter.temp}°`;
+      $("wxText").textContent = h.wetter.text;
+      $("wxMeta").textContent = `${h.wetter.ort} · ${h.wetter.min}° / ${h.wetter.max}°`;
+    } else { $("wxText").textContent = "nicht verfügbar"; }
+    if (h.akku) {
+      setBar("battBar", h.akku.prozent);
+      $("battText").textContent = `${h.akku.prozent} %${h.akku.laedt ? " · lädt" : ""}`;
+    } else { $("battText").textContent = "Netzbetrieb"; setBar("battBar", 100); }
+    if (h.lautstaerke !== null) { setBar("volBar", h.lautstaerke); $("volText").textContent = `Lautstärke ${h.lautstaerke} %`; }
+    setKv("sysModel", (h.modell || "–").replace(/^gemini-/, "Gemini "));
+  } catch {}
+  setKv("sysNet", navigator.onLine ? "online" : "offline", navigator.onLine ? "ok" : "warn");
+}
+refreshHud(); setInterval(refreshHud, 30000);
+
+function refreshSys() {
+  setKv("sysVoice", fishOn ? (voiceSelect.selectedOptions[0]?.text || "Fish Audio").replace(" (Standard)", "") : "Browser");
+  setKv("sysMic", !rec ? "nicht verfügbar" : listening ? "aktiv" : "aus", listening ? "ok" : "warn");
+}
+setInterval(refreshSys, 1000);
+
+async function refreshNews() {
+  try {
+    const { schlagzeilen = [] } = await fetch("/api/news").then((r) => r.json());
+    const el = $("tickerText");
+    el.innerHTML = "";
+    schlagzeilen.forEach((t) => { const b = document.createElement("b"); b.textContent = "◆"; el.append(b, t); });
+  } catch {}
+}
+refreshNews(); setInterval(refreshNews, 10 * 60_000);
+
+function renderTimers() {
+  const ul = $("timerList");
+  ul.innerHTML = "";
+  if (!timers.length) { ul.innerHTML = '<li class="muted small">Keine aktiven Timer</li>'; return; }
+  for (const t of timers) {
+    const left = Math.max(0, Math.round((t.end - Date.now()) / 1000));
+    const li = document.createElement("li"), span = document.createElement("span"), b = document.createElement("b");
+    span.textContent = t.label;
+    b.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    li.append(span, b); ul.appendChild(li);
+  }
+}
+setInterval(() => timers.length && renderTimers(), 1000);
+
+// ---------- Präsentation ----------
+let deck = null, slideIdx = 0;
+function openSlides(data) {
+  deck = data; slideIdx = 0;
+  $("slidesTitle").textContent = data.titel || "Präsentation";
+  $("slideDots").innerHTML = "";
+  data.folien.forEach((_, i) => { const d = document.createElement("i"); d.onclick = () => showSlide(i); $("slideDots").appendChild(d); });
+  // Bilder schon vorab suchen, damit das Blättern flüssig ist
+  data.folien.forEach((f) => {
+    f.bild = f.bildsuche ? fetch(`/api/image?q=${encodeURIComponent(f.bildsuche)}`).then((r) => r.json()).then((j) => j.url).catch(() => null) : Promise.resolve(null);
+  });
+  $("slides").classList.remove("hidden");
+  showSlide(0);
+}
+async function showSlide(i) {
+  if (!deck) return;
+  slideIdx = Math.max(0, Math.min(deck.folien.length - 1, i));
+  const f = deck.folien[slideIdx], slide = document.querySelector(".slide");
+  slide.classList.remove("anim"); void slide.offsetWidth; slide.classList.add("anim");
+  $("slideHead").textContent = f.titel;
+  $("slidePoints").innerHTML = "";
+  f.punkte.forEach((p, k) => { const li = document.createElement("li"); li.textContent = p; li.style.animationDelay = `${0.15 + k * 0.12}s`; $("slidePoints").appendChild(li); });
+  $("slidesCount").textContent = `${slideIdx + 1} / ${deck.folien.length}`;
+  [...$("slideDots").children].forEach((d, k) => d.classList.toggle("on", k === slideIdx));
+  const img = $("slideImg"), media = img.parentElement, shown = slideIdx;
+  img.removeAttribute("src"); media.classList.add("noimg");
+  const url = await f.bild;
+  if (url && shown === slideIdx) { img.src = url; img.alt = f.bildsuche; media.classList.remove("noimg"); }
+}
+function closeSlides() { deck = null; $("slides").classList.add("hidden"); }
+$("slidePrev").onclick = () => showSlide(slideIdx - 1);
+$("slideNext").onclick = () => showSlide(slideIdx + 1);
+$("slidesClose").onclick = closeSlides;
+document.addEventListener("keydown", (e) => {
+  if (!deck) return;
+  if (e.key === "ArrowRight" || e.key === "PageDown") showSlide(slideIdx + 1);
+  if (e.key === "ArrowLeft" || e.key === "PageUp") showSlide(slideIdx - 1);
+  if (e.key === "Escape") closeSlides();
+});
+// Sprachsteuerung der Folien (ohne „Jarvis“): gibt true zurück, wenn ein Befehl erkannt wurde
+function slideVoiceCommand(text) {
+  if (!deck) return false;
+  const t = text.toLowerCase().trim();
+  if (/^(weiter|nächste|nächste folie|vor|vorwärts)\b/.test(t)) { showSlide(slideIdx + 1); return true; }
+  if (/^(zurück|vorherige|vorherige folie)\b/.test(t)) { showSlide(slideIdx - 1); return true; }
+  if (/^(schließen|beenden|ende|fertig|präsentation schließen|präsentation beenden)\b/.test(t)) { closeSlides(); return true; }
+  return false;
+}

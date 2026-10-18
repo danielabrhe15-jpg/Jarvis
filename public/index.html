@@ -9,6 +9,8 @@
 <body>
   <div class="grid-bg"></div>
   <div class="vignette"></div>
+  <div class="scan"></div>
+  <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
 
   <header>
     <div class="hud-left">
@@ -21,9 +23,44 @@
     </div>
   </header>
 
+  <!-- Seitenpanels mit Live-Daten -->
+  <aside class="hud-panel left">
+    <section class="card">
+      <h3>Wetter</h3>
+      <div class="wx"><span id="wxTemp" class="big">--°</span><span id="wxText" class="small">lädt …</span></div>
+      <div id="wxMeta" class="small muted"></div>
+    </section>
+    <section class="card">
+      <h3>System</h3>
+      <ul class="kv">
+        <li><span>KI</span><b id="sysModel">–</b></li>
+        <li><span>Stimme</span><b id="sysVoice">–</b></li>
+        <li><span>Mikrofon</span><b id="sysMic">–</b></li>
+        <li><span>Verbindung</span><b id="sysNet">online</b></li>
+      </ul>
+    </section>
+  </aside>
+  <aside class="hud-panel right">
+    <section class="card">
+      <h3>Energie</h3>
+      <div class="meter"><i id="battBar"></i></div>
+      <div class="small"><span id="battText">–</span></div>
+    </section>
+    <section class="card">
+      <h3>Audio</h3>
+      <div class="meter"><i id="volBar"></i></div>
+      <div class="small"><span id="volText">–</span></div>
+    </section>
+    <section class="card">
+      <h3>Timer</h3>
+      <ul id="timerList" class="timers"><li class="muted small">Keine aktiven Timer</li></ul>
+    </section>
+  </aside>
+
   <main>
     <div class="stage">
       <svg class="hud-arcs" viewBox="0 0 400 400" aria-hidden="true">
+        <g id="ticks" class="ticks"></g>
         <circle cx="200" cy="200" r="190" class="arc a1" />
         <circle cx="200" cy="200" r="172" class="arc a2" />
         <circle cx="200" cy="200" r="156" class="arc a3" />
@@ -43,6 +80,30 @@
     <!-- Antworten erscheinen hier nur, wenn Text ausdrücklich gewünscht ist oder die Sprachausgabe aus ist -->
     <section id="log" class="log" aria-live="polite"></section>
   </main>
+
+  <!-- Bildliche Präsentation (Vollbild) -->
+  <div id="slides" class="slides hidden" role="dialog" aria-label="Präsentation">
+    <div class="slides-top">
+      <span id="slidesTitle" class="slides-title"></span>
+      <span id="slidesCount" class="slides-count"></span>
+      <button id="slidesClose" class="icon" type="button" title="Schließen (Esc)" aria-label="Schließen">✕</button>
+    </div>
+    <div class="slide">
+      <div class="slide-media"><img id="slideImg" alt="" /></div>
+      <div class="slide-body">
+        <h2 id="slideHead"></h2>
+        <ul id="slidePoints"></ul>
+      </div>
+    </div>
+    <div class="slides-nav">
+      <button id="slidePrev" type="button">&lt; Zurück</button>
+      <div id="slideDots" class="dots"></div>
+      <button id="slideNext" type="button">Weiter &gt;</button>
+    </div>
+    <div class="small muted center">Sag „weiter“, „zurück“ oder „schließen“ – oder nutze die Pfeiltasten</div>
+  </div>
+
+  <div class="ticker"><div id="tickerText" class="ticker-text"></div></div>
 
   <footer>
     <form id="form" class="hidden" autocomplete="off">
