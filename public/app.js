@@ -228,7 +228,7 @@ if (!SR) {
 
 // Die deutsche Spracherkennung schreibt „Jarvis“ oft anders (Javis, Dschawis, Charvis …).
 // Gibt den Text nach dem Wake-Word zurück, "" wenn nur das Wake-Word kam, sonst null.
-const JARVIS_LIKE = /^(j|y|g|dsch|tsch|sch|ch|sh|d)?(a|ä|e|ah)r?(w|v|b|f)(i|ie|e|y)(s|ss|ß|z|ce|ses)?$/;
+const JARVIS_LIKE = /^(j|y|g|dsch|tsch|sch|ch|sh|d|tr)?(a|ä|e|ah)r?(w|v|b|f)(i|ie|e|y)(s|ss|ß|z|ce|ses)?$/;
 const HEY_LIKE = /^(hey|hei|hej|hay|he|hi|hallo|ey|okay|ok)$/;
 function findWakeWord(text) {
   const words = text.trim().split(/\s+/);
