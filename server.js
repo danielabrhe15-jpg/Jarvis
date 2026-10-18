@@ -168,7 +168,47 @@ async function* streamOllama(messages, signal) {
 
 const providers = { claude: streamClaude, gemini: streamGemini, ollama: streamOllama };
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, provider: PROVIDER, model: MODEL }));
+// Optional: natürlichere Stimme über Fish Audio (https://fish.audio), sonst liest der Browser vor
+const FISH = process.env.FISH_API_KEY
+  ? { model: process.env.FISH_MODEL || "s2.1-pro-free", voice: process.env.FISH_VOICE_ID || null }
+  : null;
+
+app.get("/api/health", (_req, res) => res.json({ ok: true, provider: PROVIDER, model: MODEL, tts: FISH ? "fish" : "browser" }));
+
+app.post("/api/tts", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text.trim().slice(0, 2000) : "";
+  if (!FISH) return res.status(404).json({ error: "Fish Audio ist nicht eingerichtet (FISH_API_KEY fehlt in .env)." });
+  if (!text) return res.status(400).json({ error: "Kein Text." });
+
+  const controller = new AbortController();
+  res.on("close", () => controller.abort());
+  try {
+    const r = await fetch("https://api.fish.audio/v1/tts", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FISH_API_KEY}`, model: FISH.model },
+      body: JSON.stringify({ text, reference_id: FISH.voice, format: "mp3", latency: "balanced", language: "de" }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      const msg =
+        r.status === 401 ? "Ungültiger Fish-Audio-Key." :
+        r.status === 402 ? "Fish-Audio-Guthaben aufgebraucht." :
+        `Fish-Audio-Fehler: ${j.message || r.status}`;
+      console.error(msg);
+      return res.status(502).json({ error: msg });
+    }
+    res.setHeader("Content-Type", "audio/mpeg");
+    for await (const chunk of r.body) res.write(chunk);
+    res.end();
+  } catch (err) {
+    if (!controller.signal.aborted) {
+      console.error("Fish-Audio-Fehler:", err?.message || err);
+      if (!res.headersSent) res.status(502).json({ error: "Fish Audio nicht erreichbar." });
+      else res.end();
+    }
+  }
+});
 
 app.post("/api/chat", async (req, res) => {
   const messages = sanitize(req.body?.messages);

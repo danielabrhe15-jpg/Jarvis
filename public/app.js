@@ -70,24 +70,70 @@ if (synth) {
 }
 voiceSelect.onchange = () => localStorage.setItem("jarvis-voice", voiceSelect.value);
 
+// Fish Audio: wird genutzt, wenn der Server einen FISH_API_KEY hat
+let fishOn = false;
+fetch("/api/health").then((r) => r.json()).then((j) => {
+  fishOn = j.tts === "fish";
+  if (fishOn) { voiceSelect.style.display = "none"; ttsToggle.disabled = false; }
+}).catch(() => {});
+
+let speakGen = 0, currentAudio = null, audioChain = Promise.resolve();
+
+function speakBrowser(text) {
+  return new Promise((resolve) => {
+    if (!synth) return resolve();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = LANG;
+    u.rate = 1.05;
+    u.pitch = 1;
+    const v = voices.find((x) => x.name === voiceSelect.value);
+    if (v) u.voice = v;
+    u.onend = u.onerror = () => resolve();
+    synth.speak(u);
+  });
+}
+
+function playAudio(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const a = new Audio(url);
+    currentAudio = a;
+    a.onended = () => { URL.revokeObjectURL(url); resolve(); };
+    a.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Audio-Fehler")); };
+    a.play().catch(reject);
+  });
+}
+
 function speak(text) {
-  if (!synth || !ttsToggle.checked || !text.trim()) return;
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = LANG;
-  u.rate = 1.05;
-  u.pitch = 1;
-  const v = voices.find((x) => x.name === voiceSelect.value);
-  if (v) u.voice = v;
+  if (!ttsToggle.checked || !text.trim() || (!fishOn && !synth)) return;
+  const gen = speakGen;
   speakQueue++;
   pauseRecognition();
   setState("speaking", "Spricht");
-  u.onend = u.onerror = () => {
+  // Audio schon jetzt anfordern, damit der nächste Satz bereitliegt
+  const audio = fishOn
+    ? fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) })
+        .then((r) => (r.ok ? r.blob() : r.json().then((j) => Promise.reject(new Error(j.error)))))
+    : null;
+  audio?.catch(() => {});
+  audioChain = audioChain.then(async () => {
+    if (gen !== speakGen) return;
+    if (!audio) return speakBrowser(text);
+    try { await playAudio(await audio); }
+    catch (err) { console.warn("Fish Audio:", err.message); if (gen === speakGen) await speakBrowser(text); }
+  }).finally(() => {
+    if (gen !== speakGen) return;
     speakQueue = Math.max(0, speakQueue - 1);
     if (speakQueue === 0 && !busy) { setState(null); resumeRecognition(); }
-  };
-  synth.speak(u);
+  });
 }
-function stopSpeaking() { if (synth) { synth.cancel(); speakQueue = 0; } }
+function stopSpeaking() {
+  speakGen++;
+  speakQueue = 0;
+  audioChain = Promise.resolve();
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  if (synth) synth.cancel();
+}
 
 // ---------- Chat mit Claude (Streaming) ----------
 async function ask(text) {

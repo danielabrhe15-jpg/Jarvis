@@ -32,6 +32,10 @@ Dein persönlicher, sprachgesteuerter KI-Assistent im Iron-Man-Stil. Läuft **ko
 | **Ollama** | kostenlos, offline, unbegrenzt | <https://ollama.com> installieren, `ollama pull llama3.2`, in `.env` `PROVIDER=ollama` setzen. Braucht einen halbwegs starken PC. |
 | **Claude** | kostenpflichtig | Key von <https://console.anthropic.com> in `ANTHROPIC_API_KEY` |
 
+## Natürlichere Stimme mit Fish Audio (optional)
+
+Trag in `.env` deinen Key von <https://fish.audio/app/api-keys> als `FISH_API_KEY` ein und als `FISH_VOICE_ID` die ID einer Stimme (das Ende der Adresse `fish.audio/m/…`). Ohne Fish Audio oder wenn das Guthaben leer ist, liest der Browser vor.
+
 ## Bedienung
 
 | Aktion | So geht's |
